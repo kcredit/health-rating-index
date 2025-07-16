@@ -1,6 +1,6 @@
 ### ----------------------------
 ### Environmental Health Rating Index Calculation
-### Author: [Redacted]
+### Author: Dr. Kevin Credit, Maynooth University
 ### Description: Estimating the population-level health burden from environmental noise and air pollution exposure at the small area level in Dublin, Ireland.
 ### Required datasets include pre-calculated accessibility to health 'benefits' (primary healthcare and green space).
 ### ----------------------------
