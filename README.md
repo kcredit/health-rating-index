@@ -11,7 +11,7 @@ The core outputs include:
 This tool is intended to support public health and urban policy decision-making by quantifying the health impacts of environmental exposures in a local context.
 
 🗺️ **Location:** Dublin, Ireland  
-🧪 **Tools:** R, tidyverse, sf, data.table  
+🧪 **Tools:** R, tidyverse, sf, ranger, ALEplot 
 📊 **Data Sources:** CSO, OSM, [greenR](https://github.com/sachit27/greenR), [Ireland's Open Data Portal](https://data.gov.ie/dataset/family-practice-gp-sites), [Google AirView](https://data.gov.ie/dataset/google-airview-data-dublin-city), [Dublinked](https://data.smartdublin.ie/dataset/noise-maps-from-traffic-sources-in-dublin-city-council), [Pobal](https://data.gov.ie/dataset/pobal-hp-deprivation-index-scores-2022), WHO environmental burden of disease models
 
 Please cite the conference paper when using the prepared data inputs or code:
