@@ -135,7 +135,7 @@ The script automatically loads all required packages. Key dependencies include:
 - `tidyverse`, `data.table`
 - `conflicted`
 
-**Visualization:**
+**Visualisation:**
 - `ggplot2`, `leaflet`, `leaflet.extras`
 - `gridExtra`
 
