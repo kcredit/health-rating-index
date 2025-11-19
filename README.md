@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15183740.svg)](https://doi.org/10.5281/zenodo.15183740)
 
-This repository provides a comprehensive analysis of environmental health burdens and benefits in Dublin, Ireland. The project calculates a **Health Rating Index (HRI)** that combines years of life lost from environmental exposures (air pollution and road noise) with access to health benefits (GP services, green spaces, and blue spaces).
+This repository provides a comprehensive analysis of environmental health burdens and benefits in Dublin, Ireland. The project calculates a **Health Rating Index (HRI)** that combines years of life lost from environmental exposures (air pollution and road noise) with access to health benefits (GP services, green spaces, and blue spaces). This repository expands on the methods used in the paper references here; updated version forthcoming.
 
 ## 📋 Overview
 
