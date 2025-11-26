@@ -1,8 +1,8 @@
 # Health Rating Index for Dublin, Ireland
 
-![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15183740.svg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15183740.svg)](https://doi.org/10.5281/zenodo.15183740)
 
-This repository provides a comprehensive analysis of environmental health burdens and benefits in Dublin, Ireland. The project calculates a **Health Rating Index (HRI)** that combines years of life lost from environmental exposures (air pollution and road noise) with access to health benefits (GP services, green spaces, and blue spaces). This repository expands on the methods used in the paper references here; updated version forthcoming.
+This repository provides a comprehensive analysis of environmental health burdens and benefits in Dublin, Ireland. The project calculates a **Health Rating Index (HRI)** that combines years of life lost from environmental exposures (air pollution and road noise) with poor quality housing rate and access to health benefits (GP services, green spaces, and blue spaces). This repository expands on the methods used in the paper referenced here; updated version forthcoming.
 
 ## 📋 Overview
 
@@ -10,7 +10,7 @@ This project estimates the population-level health burden from environmental exp
 - **Road traffic noise** (55-75+ dB contours)
 - **Air pollution** (PM2.5, NO₂, and O₃)
 
-Using publicly available spatial datasets and risk models from the World Health Organization ([WHO, 2022](https://www.eionet.europa.eu/etcs/etc-he/products/etc-he-products/etc-he-reports/etc-he-report-2022-10-health-risk-assessment-of-air-pollution-and-the-impact-of-the-new-who-guidelines/@@download/file/ETC%20HE%202022-10_Eionet_report_HRA_FINAL_28-11-2022.pdf)) and existing academic work ([Hanigan et al. 2019](https://ij-healthgeographics.biomedcentral.com/articles/10.1186/s12942-019-0184-x)), this analysis calculates the Years of Life Lost (YLL) attributable to noise and air pollution. These health burdens are then combined with access metrics for GP services and green/blue spaces to create a holistic Health Rating Index.
+Using publicly available spatial datasets and risk models from the World Health Organization ([WHO, 2022](https://www.eionet.europa.eu/etcs/etc-he/products/etc-he-products/etc-he-reports/etc-he-report-2022-10-health-risk-assessment-of-air-pollution-and-the-impact-of-the-new-who-guidelines/@@download/file/ETC%20HE%202022-10_Eionet_report_HRA_FINAL_28-11-2022.pdf)) and existing academic work ([Hanigan et al. 2019](https://ij-healthgeographics.biomedcentral.com/articles/10.1186/s12942-019-0184-x)), this analysis calculates the Years of Life Lost (YLL) attributable to noise and air pollution. These health burdens are then combined with poor quality housing rate derived from the publicly-available [BER dataset](https://ndber.seai.ie/BERResearchTool/ber/search.aspx) and access metrics for GP services and green/blue spaces to create a holistic Health Rating Index.
 
 ### Health Rating Index for Dublin
 
@@ -18,7 +18,7 @@ Using publicly available spatial datasets and risk models from the World Health 
 
 *Interactive map showing the Health Rating Index across Dublin small areas. Higher values (blue) indicate better health environments with greater access to health benefits and lower environmental burdens. Lower values (red) indicate areas with higher health burdens and limited access to health-promoting amenities.*
 
-The HRI is analyzed using **spatial cross-validation random forest** models and compared to traditional spatial econometric approaches, providing insights into the relationship between environmental health and social factors.
+The HRI is analyzed using **spatial cross-validation random forest** models and compared to traditional spatial econometric approaches using the `SArf` [package](https://github.com/kcredit/SArf), providing insights into the relationship between environmental health and social factors.
 
 ## 🚀 Key Components
 
@@ -75,7 +75,7 @@ health-rating-index/
 │   ├── Park_Dest.csv              # Park destinations
 │   ├── Blue_Dest.csv              # Coastline points
 │   ├── dist_sa_gp.csv             # Pre-calculated GP travel times
-│   ├── dist_sa_pk1.csv            # Pre-calculated park travel times
+│   ├── dist_sa_pk1.csv            # Pre-calculated park travel times (available from [Zenodo - DOI 10.5281/zenodo.17651839](https://zenodo.org/records/17651840))
 │   ├── dist_sa_bs.csv             # Pre-calculated blue space travel times
 │   ├── DCC Parks.shp              # Park polygons
 │   ├── SA2022_Dublin_AllData3.shp # Small area spatial data
@@ -86,17 +86,9 @@ health-rating-index/
 ├── output/                        # Analysis outputs
 │   ├── total_years_life_lost.csv
 │   ├── hri_correlation_matrix.csv
-│   ├── model_comparison.csv
-│   ├── sac_model_summary.txt
-│   ├── variable_importance_with_ci.csv
 │   ├── variable_importance_plot.png
 │   ├── ale_plots_combined.png
-│   ├── map_hri.html
-│   ├── map_green_space.html
-│   ├── map_blue_space.html
-│   ├── map_gp_access.html
-│   ├── map_air_pollution_yll.html
-│   └── map_noise_yll.html
+│   ├── map_hri_preview.png
 │
 ├── health_rating_index_analysis.R # Main analysis script
 └── README.md                      # This file
@@ -129,7 +121,7 @@ The script automatically loads all required packages. Key dependencies include:
 
 **Machine Learning:**
 - `ranger`, `xgboost`, `e1071`
-- `vip`, `pdp`, `ALEPlot`
+- `vip`, `pdp`, `ALEPlot`, `SArf`
 
 **Data Manipulation:**
 - `tidyverse`, `data.table`
@@ -142,7 +134,7 @@ The script automatically loads all required packages. Key dependencies include:
 **Accessibility Analysis:**
 - `r5r` (optional - for recalculating travel times)
 
-Install all packages by running:
+Install base packages by running:
 ```r
 packages.wanted <- c("stats", "sf", "vip", "spdep", "tidymodels", "pdp", 
                      "gridExtra", "magrittr", "randomForest", "conflicted", 
@@ -155,6 +147,9 @@ for (package in packages.wanted) {
     install.packages(package)
   }
 }
+
+#To download SArf from GitHub:
+devtools::install_github("kcredit/SArf", auth_token = NULL, force = TRUE)
 ```
 
 ### Optional: r5r Setup
@@ -231,7 +226,7 @@ On a standard laptop (8GB RAM, 4 cores):
 ### Index Construction
 
 Three weighting approaches:
-1. **Naive**: Equal weights (1/4 GP, 1/8 green, 1/8 blue, 1/4 air, 1/4 noise)
+1. **Naive**: Equal weights (1/6 GP, 1/6 green, 1/6 blue, 1/6 air, 1/6 noise, 1/6 poor quality housing rate)
 2. **Entropy**: Data-driven weights based on information entropy
 3. **PCA**: Variance-based weights from principal component analysis
 
@@ -298,22 +293,6 @@ This project is shared for academic and public health research purposes. When us
 1. Cite the conference paper
 2. Acknowledge the data sources
 3. Share derivative works openly when possible
-
-## 🔄 Updates
-
-**Version 2.0 (November 2024):**
-- Added spatial cross-validation bootstrap framework
-- Implemented confidence intervals for variable importance and ALE plots
-- Added 12 HRI variants with different weighting schemes
-- Comprehensive comparison of spatial econometric models
-- Interactive HTML maps for all key variables
-- Streamlined code for public use
-- Focus on Years of Life Lost (YLL) as primary health burden metric
-
-**Version 1.0 (March 2024):**
-- Initial release with basic HRI calculation
-- Single weighting approach
-- Standard random forest analysis
 
 ---
 
