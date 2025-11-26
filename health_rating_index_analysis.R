@@ -25,25 +25,27 @@
 
 rm(list=ls())
 
-# Required packages
-packages.wanted <- c("stats", "sf", "vip", "spdep", "tidymodels", "vip", "pdp", 
-                     "gridExtra", "magrittr", "randomForest", "conflicted", 
-                     "finalfit", "leafgl", "mapview", "data.table", "s2", "sf", 
-                     "r5r", "GGally", "MASS", "robustbase", "mvoutlier", 
-                     "RColorBrewer", "rgdal", "ggplot2", "Hmisc", "purrr", 
-                     "foreign", "stargazer", "tidyverse", "devtools", "otpr", 
-                     "httr", "preogress", "sandwich", "lmtest", "googletraffic", 
-                     "raster", "ranger", "mgcv", "xgboost", "e1071", "hydroGOF", 
-                     "ALEPlot", "spatialreg", "blockCV", "leaflet", "leaflet.extras")
+# Install SArf from GitHub
+devtools::install_github("kcredit/SArf", auth_token = NULL, force = TRUE)
 
-for (package in packages.wanted) require(package, character.only=TRUE)
+# Load ONLY what you need for SArf
+library(ggplot2)  # Load first
+library(sf)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(spdep)
+library(leaflet)
+library(leaflet.extras)
+library(blockCV)  # Load after ggplot2
+library(SArf)     # Load last
 
-# Resolve function conflicts
+
+# Resolve conflicts
+library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
-conflict_prefer("summarize", "dplyr")
-conflicted::conflicts_prefer(pdp::partial)
-conflicted::conflicts_prefer(vip::vi)
+
 
 # Set working directory (update this to your local path)
 setwd("~/Dropbox/Grants/New Foundations/Smart D8 Dashboard/Anaysis Data/health-rating-index") #Change for user directoy
@@ -532,10 +534,12 @@ air$YLLAQ <- air$YLLPM25 + air$YLLNO2 + air$YLLO3
 
 # Simplify air data
 air <- air %>%
-  select(SA_PUB2022, POP30P, SHAPE_Area, T1_1AGETT, total_pop_all_f, total_pop_all_m, LE_all_m, 
+  select(SA_PUB2022, POP30P, SHAPE_Area, T1_1AGETT, T6_2_TH, total_pop_all_f, total_pop_all_m, LE_all_m, 
          LE_all_f, LE_30P_m, LE_30P_f,YLLPM25, YLLNO2, YLLO3, YLLAQ, 
          T10_4_OD_2, T10_4_HD_2, T10_4_PDT,T10_4_DT, T10_4_TT, T11_1_FT, 
-         T11_1_BIT,T11_1_BUT, T11_1_TDLT,T11_1_TT, T12_3_BT, T12_3_VBT, T12_3_TT)
+         T11_1_BIT,T11_1_BUT, T11_1_TDLT,T11_1_TT, T12_3_BT, T12_3_VBT, 
+         T12_3_TT,T1_1AGE6_1,T1_1AGE6_2,T1_1AGE7_1, T1_1AGE7_2,
+         T1_1AGE8_1,T1_1AGEG_1,T2_1IEC,T2_1TC)
 
 cat("  Total YLL from air pollution:", round(sum(air$YLLAQ, na.rm=TRUE), 2), "\n")
 
@@ -615,7 +619,7 @@ cat("\n=== TESTING MULTIPLE INDEX WEIGHTING APPROACHES ===\n")
 
 # Load spatial data
 SA <- st_read("data/SA2022_Dublin_AllData3.shp", quiet = TRUE) %>%
-  select(SA_PUB2022, RoutingKey, In22_ED, SOUTH, log_dist)
+  select(SA_PUB2022, RoutingKey, In22_ED, SOUTH, log_dist, total)
 
 SA <- SA %>%
   left_join(sa_access, by = c("SA_PUB2022" = "SA_PUB202")) %>%
@@ -626,19 +630,23 @@ summary(SA[, c("YLLAQ", "YLLN")])
 # Create rate variables
 SA$YLLAQPC <- (SA$YLLAQ / SA$T1_1AGETT) * 100000
 SA$YLLNPC <- (SA$YLLN / SA$T1_1AGETT) * 100000
+SA$ph_rate <- SA$total/SA$T6_2_TH
+SA$ph_rate[is.infinite(SA$ph_rate) | is.nan(SA$ph_rate)] <- 0
+SA$ph_rate <- pmin(SA$ph_rate, 1)
 
 # Function to calculate naive weights
 calc_naive <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
   df_scaled <- df_data %>%
-    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC"))) %>%
+    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%
     mutate(across(everything(), ~scale(.)[,1]))
   
-  hri <- (1/4) * df_scaled[[gp_var]] + 
-         (1/8) * df_scaled$gs_access + 
-         (1/8) * df_scaled$bs_access - 
-         (1/4) * df_scaled$YLLAQPC - 
-         (1/4) * df_scaled$YLLNPC
+  hri <- (1/6) * df_scaled[[gp_var]] + 
+    (1/6) * df_scaled$gs_access + 
+    (1/6) * df_scaled$bs_access - 
+    (1/6) * df_scaled$YLLAQPC - 
+    (1/6) * df_scaled$YLLNPC -
+    (1/6) * df_scaled$ph_rate  
   
   (hri - min(hri)) / (max(hri) - min(hri))
 }
@@ -647,9 +655,11 @@ calc_naive <- function(df, gp_var) {
 calc_entropy <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
   df_norm <- df_data %>%
-    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC"))) %>%
+    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%  # Added ph_rate
     mutate(across(everything(), ~ (. - min(.)) / (max(.) - min(.)))) %>%
-    mutate(YLLAQPC = 1 - YLLAQPC, YLLNPC = 1 - YLLNPC)
+    mutate(YLLAQPC = 1 - YLLAQPC, 
+           YLLNPC = 1 - YLLNPC,
+           ph_rate = 1 - ph_rate)  # Reverse ph_rate (higher = worse)
   
   p <- df_norm / rowSums(df_norm)
   n <- nrow(df_norm)
@@ -668,9 +678,10 @@ calc_entropy <- function(df, gp_var) {
 calc_pca <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
   df_pca <- df_data %>%
-    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC"))) %>%
+    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%  # Added ph_rate
     mutate(YLLAQPC = max(YLLAQPC, na.rm = TRUE) - YLLAQPC,
-           YLLNPC = max(YLLNPC, na.rm = TRUE) - YLLNPC) %>%
+           YLLNPC = max(YLLNPC, na.rm = TRUE) - YLLNPC,
+           ph_rate = max(ph_rate, na.rm = TRUE) - ph_rate) %>%  # Reverse ph_rate
     na.omit()
   
   row_ids <- as.numeric(rownames(df_pca))
@@ -708,7 +719,7 @@ SA_results <- SA
 for (gp_var in gp_vars) {
   for (method in methods) {
     col_name <- paste0("HRI_", substr(gp_var, 1, nchar(gp_var)-3), "_", 
-                      substr(method, 1, 1))
+                       substr(method, 1, 1))
     
     SA_results[[col_name]] <- switch(method,
                                      "naive" = calc_naive(SA, gp_var),
@@ -733,558 +744,68 @@ print(col_means)
 write.csv(round(cor_matrix, 3), "output/hri_correlation_matrix.csv")
 
 ################################################################################
-# KEY COMPONENT 6: Spatial Cross-Validation Random Forest
+# KEY COMPONENTS 6-7: Spatial Cross-Validation Random Forest, and 
+# Bootstrap Spatial CV for ALE and Importance with CIs, using the 
+# SArf package (https://github.com/kcredit/SArf)
 ################################################################################
 
 cat("\n=== SPATIAL CROSS-VALIDATION RANDOM FOREST ===\n")
 
 # Prepare model data
-SA_results$Bach_p <- (SA_results$T10_4_OD_2 + SA_results$T10_4_HD_2 + 
-                      SA_results$T10_4_PDT + SA_results$T10_4_DT) / 
-                      SA_results$T10_4_TT
 SA_results$NoAuto_p <- (SA_results$T11_1_FT + SA_results$T11_1_BIT + 
                         SA_results$T11_1_BUT + SA_results$T11_1_TDLT) / 
                         SA_results$T11_1_TT
 SA_results$BVBHth_p <- (SA_results$T12_3_BT + SA_results$T12_3_VBT) / 
                         SA_results$T12_3_TT
-SA_results$log_POP <- log(SA_results$T1_1AGETT)
+SA_results$ov60 <- (SA_results$T1_1AGE6_1+SA_results$T1_1AGE6_2+SA_results$T1_1AGE7_1+
+                      SA_results$T1_1AGE7_2+SA_results$T1_1AGE8_1+SA_results$T1_1AGEG_1) / SA_results$T1_1AGETT
+SA_results$nonIrish <- 1-(SA_results$T2_1IEC / SA_results$T2_1TC)
 SA_results$POPD <- SA_results$T1_1AGETT / SA_results$SHAPE_Area
-SA_results$Bach_p[is.na(SA_results$Bach_p)] <- 0
 
 # Create spatial neighbors (20 nearest neighbors)
 coords <- st_centroid(st_geometry(SA_results), of_largest_polygon=TRUE)
-sar.nb20 <- knearneigh(coords, k=20)
-sar.nb20 <- knn2nb(sar.nb20)
-sar.wt <- nb2listw(sar.nb20, style="W")
-
-# Calculate spatial lags
-SA_results$w_HRI_gaus_p <- lag.listw(sar.wt, as.numeric(SA_results$HRI_gaus_p))
-SA_results$w_Bach_p <- lag.listw(sar.wt, as.numeric(SA_results$Bach_p))
-SA_results$w_NoAuto_p <- lag.listw(sar.wt, SA_results$NoAuto_p)
-SA_results$w_BVBHth_p <- lag.listw(sar.wt, SA_results$BVBHth_p)
-SA_results$w_POPD <- lag.listw(sar.wt, SA_results$POPD)
-
-# Create postcode dummy variables
-SA <- as.data.frame(SA_results)
-SA$D01 <- ifelse(SA$RoutingKey=="DUBLIN 1", 1, 0)
-SA$D02 <- ifelse(SA$RoutingKey=="DUBLIN 2", 1, 0)
-SA$D03 <- ifelse(SA$RoutingKey=="DUBLIN 3", 1, 0)
-SA$D04 <- ifelse(SA$RoutingKey=="DUBLIN 4", 1, 0)
-SA$D05 <- ifelse(SA$RoutingKey=="DUBLIN 5", 1, 0)
-SA$D06 <- ifelse(SA$RoutingKey=="DUBLIN 6", 1, 0)
-SA$D6W <- ifelse(SA$RoutingKey=="DUBLIN 6W", 1, 0)
-SA$D07 <- ifelse(SA$RoutingKey=="DUBLIN 7", 1, 0)
-SA$D08 <- ifelse(SA$RoutingKey=="DUBLIN 8", 1, 0)
-SA$D09 <- ifelse(SA$RoutingKey=="DUBLIN 9", 1, 0)
-SA$D10 <- ifelse(SA$RoutingKey=="DUBLIN 10", 1, 0)
-SA$D11 <- ifelse(SA$RoutingKey=="DUBLIN 11", 1, 0)
-SA$D12 <- ifelse(SA$RoutingKey=="DUBLIN 12", 1, 0)
-SA$D13 <- ifelse(SA$RoutingKey=="DUBLIN 13", 1, 0)
-SA$D17 <- ifelse(SA$RoutingKey=="DUBLIN 17", 1, 0)
-SA$D20 <- ifelse(SA$RoutingKey=="DUBLIN 20", 1, 0)
+sar.nb20 <- spdep::knearneigh(coords, k=20)
+sar.nb20 <- spdep::knn2nb(sar.nb20)
+sar.wt <- spdep::nb2listw(sar.nb20, style="W")
 
 ## Spatial Cross-Validation Setup ##
 
 model_data <- SA_results %>%
-  filter(!is.na(HRI_gaus_p)) %>%
-  select(HRI_gaus_p, In22_ED, NoAuto_p, BVBHth_p, POPD, log_dist)
+  filter(!is.na(HRI_gaus_n)) %>%
+  select(HRI_gaus_n, In22_ED, NoAuto_p, POPD, log_dist, ov60, nonIrish)
 
 model_data_spatial <- st_transform(model_data, 29902)
 
 model_data <- model_data %>%
   mutate(across(-geometry, ~scale(.)[,1]))
 
-# Create spatial blocks for cross-validation
-set.seed(1111)
-sb <- spatialBlock(
-  speciesData = model_data,
-  theRange = 1000,
-  k = 5,
-  selection = "random",
-  iteration = 100
+#Smaller sample for testing
+# sampled_data <- model_data %>% slice_sample(n = 500)
+
+# Run SArf
+results <- SArf(
+  HRI_gaus_n ~ In22_ED + NoAuto_p + POPD + log_dist + ov60 + nonIrish,
+  data = model_data,
+  k_neighbors = 10,            # Number of neighbors for spatial weights
+  n_folds = 5,                 # Spatial CV folds
+  n_bootstrap = 20,            # Bootstrap iterations
+  num_trees = 500,             # Trees in random forest
+  create_map = TRUE,           # Spatial folds map
+  block_range = 5000,          # Size of the spatial blocks in units of metres
+  verbose = TRUE               # Print progress
 )
 
-# Function to compute spatial lag
-compute_spatial_lag <- function(data, neighbors) {
-  y <- data$HRI_gaus_p
-  lag_y <- lag.listw(nb2listw(neighbors, style = "W"), y)
-  return(lag_y)
-}
+# print(results) # Shows all results
 
-# Spatial CV with spatial lags
-spatial_cv_results <- list()
-predictors <- c("In22_ED", "NoAuto_p", "BVBHth_p", "POPD", "log_dist")
-
-cv_models <- list()
-train_data_list <- list()
-
-cat("Running spatial cross-validation...\n")
-
-for (fold in 1:5) {
-  train_idx <- sb$folds[[fold]][[1]]
-  test_idx <- sb$folds[[fold]][[2]]
-  
-  train_data <- model_data[train_idx, ]
-  test_data <- model_data[test_idx, ]
-  
-  train_coords <- st_coordinates(st_centroid(st_geometry(train_data)))
-  train_nb <- knn2nb(knearneigh(train_coords, k = 20))
-  
-  train_data_df <- st_drop_geometry(train_data)
-  train_lag <- compute_spatial_lag(train_data_df, train_nb)
-  train_data_df$spatial_lag <- train_lag
-  
-  rf_model <- ranger(
-    HRI_gaus_p ~ .,
-    data = train_data_df[, c("HRI_gaus_p", predictors, "spatial_lag")],
-    importance = "permutation",
-    num.trees = 500,
-    mtry = 3,
-    seed = 1111
-  )
-  
-  test_data_df <- st_drop_geometry(test_data)[, c("HRI_gaus_p", predictors)]
-  test_data_df$spatial_lag <- 0
-  
-  predictions <- predict(rf_model, test_data_df)$predictions
-  
-  spatial_cv_results[[fold]] <- data.frame(
-    fold = fold,
-    observed = test_data_df$HRI_gaus_p,
-    predicted = predictions,
-    residual = test_data_df$HRI_gaus_p - predictions
-  )
-  
-  cv_models[[fold]] <- rf_model
-  train_data_list[[fold]] <- train_data_df
-}
-
-cv_combined <- do.call(rbind, spatial_cv_results)
-
-spatial_cv_rmse <- sqrt(mean(cv_combined$residual^2, na.rm = TRUE))
-spatial_cv_r2 <- cor(cv_combined$observed, cv_combined$predicted, 
-                     use = "complete.obs")^2
-
-cat("\nSpatial CV Results:\n")
-cat("  RMSE:", round(spatial_cv_rmse, 4), "\n")
-cat("  R-squared:", round(spatial_cv_r2, 4), "\n")
-
-## Moran's I on Residuals ##
-
-model_data_spatial <- model_data %>%
-  na.omit() %>%
-  mutate(residuals = cv_combined$residual)
-
-coords <- st_coordinates(st_centroid(st_geometry(model_data_spatial)))
-nb <- knn2nb(knearneigh(coords, k = 20))
-lw <- nb2listw(nb, style = "W")
-
-moran_rf <- moran.test(model_data_spatial$residuals, lw)
-
-cat("\nMoran's I on RF Residuals:\n")
-print(moran_rf)
-
-## Comparison to Spatial Econometric Models ##
-
-cat("\n=== COMPARING TO SPATIAL ECONOMETRIC MODELS ===\n")
-
-sar_formula <- as.formula("HRI_gaus_p ~ In22_ED + NoAuto_p + BVBHth_p + POPD + log_dist")
-sar_model <- lagsarlm(sar_formula, data = model_data, listw = lw)
-sem_model <- errorsarlm(sar_formula, data = model_data, listw = lw)
-sac_model <- sacsarlm(sar_formula, data = model_data, listw = lw, type = "sac")
-ols_model <- lm(sar_formula, data = model_data)
-
-# Calculate metrics
-calc_metrics <- function(observed, predicted) {
-  residuals <- observed - predicted
-  rmse <- sqrt(mean(residuals^2))
-  mae <- mean(abs(residuals))
-  r2 <- cor(observed, predicted)^2
-  return(c(RMSE = rmse, MAE = mae, R2 = r2))
-}
-
-pred_sar <- predict(sar_model)
-pred_sem <- predict(sem_model)
-pred_sac <- sac_model$fitted.values
-pred_ols <- predict(ols_model)
-
-moran_ols <- moran.test(residuals(ols_model), lw)
-moran_sar <- moran.test(residuals(sar_model), lw)
-moran_sem <- moran.test(residuals(sem_model), lw)
-moran_sac <- moran.test(residuals(sac_model), lw)
-
-# OUTPUT: Model comparison table
-cat("\n=== OUTPUT 3: MODEL COMPARISON ===\n")
-comparison <- data.frame(
-  Model = c("OLS", "SAR", "SEM", "SAC", "Random Forest Spatial CV"),
-  RMSE = c(
-    calc_metrics(model_data$HRI_gaus_p, pred_ols)[1],
-    calc_metrics(model_data$HRI_gaus_p, pred_sar)[1],
-    calc_metrics(model_data$HRI_gaus_p, pred_sem)[1],
-    calc_metrics(model_data$HRI_gaus_p, pred_sac)[1],
-    spatial_cv_rmse
-  ),
-  R2 = c(
-    calc_metrics(model_data$HRI_gaus_p, pred_ols)[3],
-    calc_metrics(model_data$HRI_gaus_p, pred_sar)[3],
-    calc_metrics(model_data$HRI_gaus_p, pred_sem)[3],
-    calc_metrics(model_data$HRI_gaus_p, pred_sac)[3],
-    spatial_cv_r2
-  ),
-  Morans_I = c(
-    moran_ols$estimate[1],
-    moran_sar$estimate[1],
-    moran_sem$estimate[1],
-    moran_sac$estimate[1],
-    moran_rf$estimate[1]
-  ),
-  Morans_pval = c(
-    moran_ols$p.value,
-    moran_sar$p.value,
-    moran_sem$p.value,
-    moran_sac$p.value,
-    moran_rf$p.value
-  )
-)
-
-print(comparison)
-write.csv(comparison, "output/model_comparison.csv", row.names = FALSE)
-
-# OUTPUT: SAC model summary
-cat("\n=== OUTPUT 4: SPATIAL LAG + ERROR MODEL (SAC) SUMMARY ===\n")
-sac_summary <- summary(sac_model)
-print(sac_summary)
-
-# Save SAC model summary to file
-sink("output/sac_model_summary.txt")
-print(sac_summary)
-sink()
-
-################################################################################
-# KEY COMPONENT 7: Bootstrap Spatial CV for ALE and Importance with CIs
-################################################################################
-
-cat("\n=== BOOTSTRAP SPATIAL CV FOR UNCERTAINTY QUANTIFICATION ===\n")
-
-# Function for spatial CV bootstrap
-spatial_cv_bootstrap_rf <- function(data, folds, predictors, target, 
-                                    n_iterations = 20, 
-                                    compute_spatial_lag = TRUE, 
-                                    k_neighbors = 20) {
-  
-  n <- nrow(data)
-  cv_results <- list()
-  result_counter <- 1
-  
-  has_spatial_lag <- "HRI_lag" %in% predictors
-  
-  for (iter in 1:n_iterations) {
-    for (fold in 1:length(folds$folds)) {
-      
-      train_idx <- folds$folds[[fold]][[1]]
-      test_idx <- folds$folds[[fold]][[2]]
-      
-      train_data_spatial <- data[train_idx, ]
-      test_data_spatial <- data[test_idx, ]
-      
-      if (has_spatial_lag && compute_spatial_lag) {
-        train_coords <- st_coordinates(st_centroid(st_geometry(train_data_spatial)))
-        train_nb <- knn2nb(knearneigh(train_coords, k = k_neighbors))
-        train_lw <- nb2listw(train_nb, style = "W", zero.policy = TRUE)
-        
-        train_data_df <- st_drop_geometry(train_data_spatial)
-        train_lag <- lag.listw(train_lw, train_data_df[[target]], 
-                               zero.policy = TRUE)
-        train_data_df$HRI_lag <- train_lag
-        
-        test_coords <- st_coordinates(st_centroid(st_geometry(test_data_spatial)))
-        test_lags <- numeric(nrow(test_data_spatial))
-        for (i in 1:nrow(test_data_spatial)) {
-          dists <- sqrt(rowSums((t(train_coords) - test_coords[i, ])^2))
-          nearest_idx <- order(dists)[1:min(k_neighbors, length(dists))]
-          test_lags[i] <- mean(train_data_df[[target]][nearest_idx], na.rm = TRUE)
-        }
-        
-        test_data_df <- st_drop_geometry(test_data_spatial)
-        test_data_df$HRI_lag <- test_lags
-        
-      } else {
-        train_data_df <- st_drop_geometry(train_data_spatial)
-        test_data_df <- st_drop_geometry(test_data_spatial)
-      }
-      
-      rf_model <- ranger(
-        formula = as.formula(paste(target, "~", paste(predictors, collapse = " + "))),
-        data = train_data_df[, c(target, predictors)],
-        num.trees = 500,
-        importance = "permutation",
-        seed = 1111 + iter * 10 + fold
-      )
-      
-      if (has_spatial_lag && compute_spatial_lag) {
-        full_coords <- st_coordinates(st_centroid(st_geometry(data)))
-        full_nb <- knn2nb(knearneigh(full_coords, k = k_neighbors))
-        full_lw <- nb2listw(full_nb, style = "W", zero.policy = TRUE)
-        full_data_df <- st_drop_geometry(data)
-        full_lag <- lag.listw(full_lw, full_data_df[[target]], 
-                              zero.policy = TRUE)
-        full_data_df$HRI_lag <- full_lag
-      } else {
-        full_data_df <- st_drop_geometry(data)
-      }
-      
-      predictions_full <- predict(rf_model, full_data_df[, predictors])$predictions
-      
-      cv_results[[result_counter]] <- list(
-        predictions = data.frame(
-          cv_iter = result_counter,
-          fold = fold,
-          iteration = iter,
-          row_id = 1:n,
-          prediction = predictions_full,
-          in_training = 1:n %in% train_idx
-        ),
-        importance = rf_model$variable.importance,
-        fold_id = fold,
-        iteration_id = iter,
-        spatial_lag_computed = has_spatial_lag
-      )
-      
-      result_counter <- result_counter + 1
-    }
-  }
-  
-  return(cv_results)
-}
-
-# Add spatial lag to model data
-model_data_spatial$HRI_lag <- lag.listw(lw, model_data_spatial$HRI_gaus_p)
-
-predictors <- c("In22_ED", "NoAuto_p", "BVBHth_p", "POPD", "log_dist", "HRI_lag")
-target <- "HRI_gaus_p"
-
-cat(paste0("Running spatial CV bootstrap: 5 folds × 20 iterations = 100 models\n"))
-cat("This may take several minutes...\n")
-
-cv_boot_results <- spatial_cv_bootstrap_rf(
-  data = model_data_spatial,
-  folds = sb,
-  predictors = predictors,
-  target = target,
-  n_iterations = 20,
-  compute_spatial_lag = TRUE,
-  k_neighbors = 20
-)
-
-## Extract Variable Importance with CIs ##
-
-importance_list <- lapply(cv_boot_results, function(x) x$importance)
-
-importance_boot <- bind_rows(
-  lapply(seq_along(importance_list), function(i) {
-    df <- as.data.frame(t(importance_list[[i]]))
-    df$cv_iter <- i
-    df$fold <- cv_boot_results[[i]]$fold_id
-    df$iteration <- cv_boot_results[[i]]$iteration_id
-    return(df)
-  })
-) %>%
-  pivot_longer(-c(cv_iter, fold, iteration), names_to = "variable", 
-               values_to = "importance")
-
-importance_summary <- importance_boot %>%
-  group_by(variable) %>%
-  summarise(
-    mean = mean(importance),
-    sd = sd(importance),
-    lower = quantile(importance, 0.025),
-    upper = quantile(importance, 0.975),
-    cv = sd(importance) / mean(importance)
-  ) %>%
-  ungroup()
-
-# OUTPUT: Variable importance with CIs
-cat("\n=== OUTPUT 5: VARIABLE IMPORTANCE WITH 95% CONFIDENCE INTERVALS ===\n")
-print(importance_summary %>% arrange(desc(mean)))
-write.csv(importance_summary, "output/variable_importance_with_ci.csv", 
-          row.names = FALSE)
-
-# Plot importance with error bars
-p_importance <- ggplot(importance_summary, 
-                       aes(x = reorder(variable, mean), y = mean)) +
-  geom_point(size = 3) +
-  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
-  coord_flip() +
-  labs(
-    title = "Variable Importance with 95% Confidence Intervals",
-    subtitle = "Based on Spatial Cross-Validation Bootstrap",
-    x = "Variable",
-    y = "Importance (Permutation)"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.background = element_rect(fill = "white", color = NA),
-    panel.background = element_rect(fill = "white", color = NA)
-  )
-
-ggsave("output/variable_importance_plot.png", p_importance, 
-       width = 8, height = 6, dpi = 300)
-
-## Calculate ALE Plots with Confidence Ribbons ##
-
-# Function to calculate ALE for each CV fold
-ale_spatial_cv <- function(data, cv_results, folds, predictor, predictors, 
-                           target, compute_spatial_lag = TRUE, k_neighbors = 8) {
-  
-  ale_cv_list <- list()
-  has_spatial_lag <- "HRI_lag" %in% predictors
-  
-  for (i in seq_along(cv_results)) {
-    
-    fold_id <- cv_results[[i]]$fold_id
-    iter_id <- cv_results[[i]]$iteration_id
-    
-    train_idx <- folds$folds[[fold_id]][[1]]
-    train_data_spatial <- data[train_idx, ]
-    
-    if (has_spatial_lag && compute_spatial_lag) {
-      train_coords <- st_coordinates(st_centroid(st_geometry(train_data_spatial)))
-      train_nb <- knn2nb(knearneigh(train_coords, k = k_neighbors))
-      train_lw <- nb2listw(train_nb, style = "W", zero.policy = TRUE)
-      
-      train_data_df <- st_drop_geometry(train_data_spatial)
-      train_lag <- lag.listw(train_lw, train_data_df[[target]], 
-                             zero.policy = TRUE)
-      train_data_df$HRI_lag <- train_lag
-    } else {
-      train_data_df <- st_drop_geometry(train_data_spatial)
-    }
-    
-    rf_model <- ranger(
-      formula = as.formula(paste(target, "~", paste(predictors, collapse = " + "))),
-      data = train_data_df[, c(target, predictors)],
-      num.trees = 500,
-      seed = 1111 + iter_id * 10 + fold_id
-    )
-    
-    yhat <- function(X.model, newdata) {
-      predict(X.model, newdata)$predictions
-    }
-    
-    ale_result <- tryCatch({
-      ALEPlot(
-        X = train_data_df[, predictors],
-        X.model = rf_model,
-        pred.fun = yhat,
-        J = which(predictors == predictor),
-        K = 40
-      )
-    }, error = function(e) NULL)
-    
-    if (!is.null(ale_result)) {
-      ale_cv_list[[i]] <- data.frame(
-        x = ale_result$x.values,
-        ale = ale_result$f.values,
-        cv_iter = i,
-        fold = fold_id,
-        iteration = iter_id
-      )
-    }
-  }
-  
-  ale_combined <- bind_rows(ale_cv_list)
-  
-  ale_summary <- ale_combined %>%
-    group_by(x) %>%
-    summarise(
-      ale_mean = mean(ale),
-      ale_sd = sd(ale),
-      ale_lower = quantile(ale, 0.025),
-      ale_upper = quantile(ale, 0.975),
-      n_folds = n()
-    ) %>%
-    filter(n_folds >= 10)
-  
-  return(list(
-    summary = ale_summary,
-    raw = ale_combined
-  ))
-}
-
-# Fit main model for variable ranking
-rf_main <- ranger(
-  formula = as.formula(paste(target, "~", paste(predictors, collapse = " + "))),
-  data = st_drop_geometry(model_data_spatial)[, c(target, predictors)],
-  num.trees = 500,
-  importance = "permutation"
-)
-
-top_vars <- names(sort(rf_main$variable.importance, decreasing = TRUE))[1:6]
-
-cat("\nCalculating ALE plots with spatial CV uncertainty for top variables...\n")
-
-ale_results <- list()
-for (var in top_vars) {
-  cat(paste0("  Processing: ", var, "\n"))
-  ale_results[[var]] <- ale_spatial_cv(
-    data = model_data_spatial,
-    cv_results = cv_boot_results,
-    folds = sb,
-    predictor = var,
-    predictors = predictors,
-    target = target,
-    compute_spatial_lag = TRUE,
-    k_neighbors = 8
-  )
-}
-
-# OUTPUT: ALE plots with confidence ribbons
-cat("\n=== OUTPUT 6: ALE PLOTS WITH 95% CONFIDENCE RIBBONS ===\n")
-
-ale_plots <- list()
-
-for (var in names(ale_results)) {
-  
-  ale_data <- ale_results[[var]]$summary
-  
-  if (nrow(ale_data) < 5) {
-    cat(paste0("Skipping ", var, " - insufficient data points\n"))
-    next
-  }
-  
-  # LOESS smoothing
-  loess_mean <- loess(ale_mean ~ x, data = ale_data, span = 0.3)
-  loess_lower <- loess(ale_lower ~ x, data = ale_data, span = 0.3)
-  loess_upper <- loess(ale_upper ~ x, data = ale_data, span = 0.3)
-  
-  ale_data$ale_mean_smooth <- predict(loess_mean)
-  ale_data$ale_lower_smooth <- predict(loess_lower)
-  ale_data$ale_upper_smooth <- predict(loess_upper)
-  
-  p <- ggplot(ale_data, aes(x = x)) +
-    geom_ribbon(aes(ymin = ale_lower_smooth, ymax = ale_upper_smooth), 
-                alpha = 0.3, fill = "steelblue") +
-    geom_line(aes(y = ale_mean_smooth), size = 1.2, color = "darkblue") +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-    labs(
-      title = paste0("ALE: ", var),
-      x = var,
-      y = "Effect on HRI"
-    ) +
-    theme_minimal() +
-    theme(
-      plot.title = element_text(face = "bold", size = 10),
-      axis.title = element_text(size = 9)
-    )
-  
-  ale_plots[[var]] <- p
-}
-
-# Combine all ALE plots into one figure
-library(gridExtra)
-ale_combined_plot <- do.call(grid.arrange, c(ale_plots, ncol = 2))
-ggsave("output/ale_plots_combined.png", ale_combined_plot, 
-       width = 12, height = 12, dpi = 300)
+# View specific results outputs
+results$moran_test              # Moran's I test for outcome variable
+results$moran_plot              # Moran's I scatter plot
+results$model_comparison        # RF vs OLS/SAR/SEM/SAC table
+show_models(results)            # Full spatial econometric model results
+results$variable_importance     # Importance with CIs
+results$importance_plot         # Importance bar chart
+results$ale_results             # ALE data
+results$ale_plots               # ALE plots with CIs
 
 ################################################################################
 # KEY COMPONENT 8: Interactive Maps
@@ -1295,19 +816,19 @@ cat("\n=== CREATING INTERACTIVE MAPS ===\n")
 SA_results <- st_transform(SA_results, 4326)
 
 # Map 1: Health Rating Index
-palhri <- colorQuantile("RdBu", SA_results$HRI_gaus_p, n = 5)
+palhri <- colorQuantile("RdYlBu", SA_results$HRI_gaus_n, n = 5)
 map_hri <- leaflet(SA_results) %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolygons(
-    fillColor = ~palhri(HRI_gaus_p),
+    fillColor = ~palhri(HRI_gaus_n),
     fillOpacity = 0.5,
     color = "white",
     weight = 0.1,
-    label = ~paste0("HRI: ", round(HRI_gaus_p, 2))
+    label = ~paste0("HRI: ", round(HRI_gaus_n, 2))
   ) %>%
   addLegend(
     pal = palhri,
-    values = ~HRI_gaus_p,
+    values = ~HRI_gaus_n,
     title = "Health Rating Index",
     position = "bottomright"
   )
@@ -1405,6 +926,27 @@ map_noise <- leaflet(SA_results_filtered) %>%
     position = "bottomright"
   )
 
+# Map 7: Poor quality housing
+SA_results_filtered <- SA_results %>%
+  filter(!is.na(ph_rate) & ph_rate > 0)
+
+palhq <- colorQuantile("viridis", SA_results_filtered$ph_rate, n = 5)
+map_hq <- leaflet(SA_results_filtered) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~palhq(ph_rate),
+    fillOpacity = 0.5,
+    color = "white",
+    weight = 0.1,
+    label = ~paste0("Rate of housing with BER of E or worse: ", round(ph_rate, 2))
+  ) %>%
+  addLegend(
+    pal = palhq,
+    values = ~ph_rate,
+    title = "Poor quality housing rate",
+    position = "bottomright"
+  )
+
 # Save maps as HTML widgets
 library(htmlwidgets)
 
@@ -1414,29 +956,7 @@ saveWidget(map_bs, "output/map_blue_space.html")
 saveWidget(map_gp, "output/map_gp_access.html")
 saveWidget(map_aq, "output/map_air_pollution_yll.html")
 saveWidget(map_noise, "output/map_noise_yll.html")
+saveWidget(map_hq, "output/map_housing_quality.html")
 
 cat("\n=== OUTPUT 7: MAPS SAVED ===\n")
 cat("Maps have been saved as HTML files in the output/ directory\n")
-
-################################################################################
-# FINAL SUMMARY
-################################################################################
-
-cat("\n" , rep("=", 80), "\n", sep = "")
-cat("ANALYSIS COMPLETE\n")
-cat(rep("=", 80), "\n\n", sep = "")
-
-cat("Key outputs saved:\n")
-cat("  1. Total years of life lost: output/total_years_life_lost.csv\n")
-cat("  2. HRI correlation matrix: output/hri_correlation_matrix.csv\n")
-cat("  3. Model comparison: output/model_comparison.csv\n")
-cat("  4. SAC model summary: output/sac_model_summary.txt\n")
-cat("  5. Variable importance with CIs: output/variable_importance_with_ci.csv\n")
-cat("  6. ALE plots: output/ale_plots_combined.png\n")
-cat("  7. Interactive maps: output/map_*.html (6 files)\n\n")
-
-cat("For questions or issues, please refer to:\n")
-cat("Credit, K., Damanpreet, K., and Eccles, E. 2025.\n")
-cat("DOI: https://doi.org/10.5281/zenodo.15183740\n\n")
-
-cat(rep("=", 80), "\n", sep = "")
