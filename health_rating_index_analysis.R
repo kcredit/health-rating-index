@@ -646,17 +646,25 @@ SA$ph_rate <- pmin(SA$ph_rate, 1)
 # Function to calculate naive weights
 calc_naive <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
-  df_scaled <- df_data %>%
+  
+  # Normalize to 0-1 first
+  df_norm <- df_data %>%
     select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%
-    mutate(across(everything(), ~scale(.)[,1]))
+    mutate(across(everything(), ~ (. - min(.)) / (max(.) - min(.))))
   
-  hri <- (1/6) * df_scaled[[gp_var]] + 
-    (1/6) * df_scaled$gs_access + 
-    (1/6) * df_scaled$bs_access - 
-    (1/6) * df_scaled$YLLAQPC - 
-    (1/6) * df_scaled$YLLNPC -
-    (1/6) * df_scaled$ph_rate  
+  # Flip the bad indicators
+  df_norm <- df_norm %>%
+    mutate(
+      YLLAQPC = 1 - YLLAQPC,
+      YLLNPC = 1 - YLLNPC,
+      ph_rate = 1 - ph_rate
+    )
   
+  # Simple average
+  hri <- (1/6) * (df_norm[[gp_var]] + df_norm$gs_access + df_norm$bs_access + 
+                    df_norm$YLLAQPC + df_norm$YLLNPC + df_norm$ph_rate)
+  
+  # Scale to 0-1
   (hri - min(hri)) / (max(hri) - min(hri))
 }
 
@@ -780,20 +788,21 @@ sar.wt <- spdep::nb2listw(sar.nb20, style="W")
 ## Spatial Cross-Validation Setup ##
 
 model_data <- SA_results %>%
-  filter(!is.na(HRI_gaus_n)) %>%
-  select(HRI_gaus_n, In22_ED, NoAuto_p, POPD, log_dist, ov60, nonIrish)
-
-model_data_spatial <- st_transform(model_data, 29902)
+  filter(!is.na(HRI_gaus_e)) %>%
+  select(HRI_gaus_e, In22_ED, NoAuto_p, POPD, log_dist, ov60, nonIrish)
 
 model_data <- model_data %>%
   mutate(across(-geometry, ~scale(.)[,1]))
+
+# Export
+# write_sf(model_data, "model_data.shp")
 
 #Smaller sample for testing
 # sampled_data <- model_data %>% slice_sample(n = 500)
 
 # Run SArf
 results <- SArf(
-  HRI_gaus_n ~ In22_ED + NoAuto_p + POPD + log_dist + ov60 + nonIrish,
+  HRI_gaus_e ~ In22_ED + NoAuto_p + POPD + log_dist + ov60 + nonIrish,
   data = model_data,
   k_neighbors = 20,            # Number of neighbors for spatial weights
   n_folds = 5,                 # Spatial CV folds
@@ -995,19 +1004,19 @@ cat("\n=== CREATING INTERACTIVE MAPS ===\n")
 SA_results <- st_transform(SA_results, 4326)
 
 # Map 1: Health Rating Index
-palhri <- colorQuantile("RdYlBu", SA_results$HRI_gaus_n, n = 5)
+palhri <- colorQuantile("RdYlBu", SA_results$HRI_gaus_e, n = 5)
 map_hri <- leaflet(SA_results) %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolygons(
-    fillColor = ~palhri(HRI_gaus_n),
+    fillColor = ~palhri(HRI_gaus_e),
     fillOpacity = 0.5,
     color = "white",
     weight = 0.1,
-    label = ~paste0("HRI: ", round(HRI_gaus_n, 2))
+    label = ~paste0("HRI: ", round(HRI_gaus_e, 2))
   ) %>%
   addLegend(
     pal = palhri,
-    values = ~HRI_gaus_n,
+    values = ~HRI_gaus_e,
     title = "Health Rating Index",
     position = "bottomright"
   )
@@ -1106,11 +1115,10 @@ map_noise <- leaflet(SA_results_filtered) %>%
   )
 
 # Map 7: Poor quality housing
-SA_results_filtered <- SA_results %>%
-  filter(!is.na(ph_rate) & ph_rate > 0)
+SA_results$ph_rate[is.na(SA_results$ph_rate) | is.infinite(SA_results$ph_rate)] <- 0
 
-palhq <- colorQuantile("viridis", SA_results_filtered$ph_rate, n = 5)
-map_hq <- leaflet(SA_results_filtered) %>%
+palhq <- colorQuantile("viridis", SA_results$ph_rate, n = 5)
+map_hq <- leaflet(SA_results) %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolygons(
     fillColor = ~palhq(ph_rate),
