@@ -1,70 +1,68 @@
 ################################################################################
-# Health Rating Index Analysis for Dublin, Ireland
-# Authors: Credit, K., Damanpreet, K., and Eccles, E.
-# Citation: Credit et al. 2025. "Exploring the transport-health-environment 
-# nexus through a new 'Health Rating Index' for Dublin, Ireland." 
-# Proceedings of the 33rd GISRUK Conference. 
-# DOI: https://doi.org/10.5281/zenodo.15183740
+# Health Rating Index (HRI) Analysis for Dublin, Ireland
+# 
+# Description:
+#   Analyzes environmental health burdens and benefits to create a Health 
+#   Rating Index for small areas in Dublin, Ireland. Components include:
+#   - GP accessibility (E2SFCA with multiple decay functions)
+#   - Green and blue space accessibility
+#   - Years of Life Lost from air pollution (PM2.5, NO2, O3) and road noise
+#   - Poor quality housing indicators
+#   
+#   Methods:
+#   - Multiple index weighting approaches (naive, entropy, PCA)
+#   - Spatial cross-validation random forest with bootstrap confidence intervals
+#   - Comparison with spatial econometric models (OLS, SAR, SEM, SAC)
+#   - Interactive web maps of results
 ################################################################################
 
-# This script analyzes environmental health burdens and benefits to create
-# a Health Rating Index (HRI) for small areas in Dublin, Ireland.
-# Key components:
-# 1. Multiple GP accessibility metrics (E2SFCA with different decay functions)
-# 2. Blue space accessibility calculation
-# 3. Green space accessibility with Gaussian decay
-# 4. Years of Life Lost (YLL) calculations for air pollution and noise
-# 5. Multiple index weighting approaches comparison
-# 6. Spatial Cross-Validation Random Forest with comparison to spatial models
-# 7. ALE and importance plots with confidence intervals
-# 8. Interactive maps of results
-
-################################################################################
-# SETUP: Load Libraries
-################################################################################
-
+# Clear workspace
 rm(list=ls())
 
-# Install SArf locally
-# Set working directory to your package
-setwd("~/Dropbox/Packages/SArf/SArf/")
-devtools::document()
-devtools::install()
-# Restart R session (important!)
-# In RStudio: Session > Restart R
+################################################################################
+# 1. LOAD LIBRARIES
+################################################################################
 
-
-# Install SArf from GitHub
-devtools::install_github("kcredit/SArf", auth_token = NULL, force = TRUE)
-
-# Load ONLY what you need for SArf
-library(ggplot2)  # Load first
+# Core packages
+library(ggplot2)
 library(sf)
 library(dplyr)
 library(tidyr)
 library(purrr)
+
+# Spatial analysis
 library(spdep)
+library(spatialreg)
+library(blockCV)
+library(SArf)  # Install: devtools::install_github("kcredit/SArf")
+
+# Visualization
 library(leaflet)
 library(leaflet.extras)
-library(blockCV)  # Load after ggplot2
-library(SArf)     # Load last
+library(htmlwidgets)
 
-
-# Resolve conflicts
+# Resolve namespace conflicts
 library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 
-
-# Set working directory (update this to your local path)
-setwd("~/Dropbox/Grants/New Foundations/Smart D8 Dashboard/Anaysis Data/health-rating-index") #Change for user directoy
-
 ################################################################################
-# LOAD DATA
+# 2. SETUP
 ################################################################################
 
-cat("Loading data files...\n")
+# Set working directory (update to your local path)
+setwd("~/Dropbox/Grants/New Foundations/Smart D8 Dashboard/Anaysis Data/health-rating-index")
 
+# Create output directory
+if (!dir.exists("output")) dir.create("output")
+
+################################################################################
+# 3. LOAD DATA
+################################################################################
+
+cat("Loading data...\n")
+
+# Origin and destination data
 sa <- read.csv("data/SA_Origin.csv")
 gp <- read.csv("data/GP_Dest.csv")
 pk <- read.csv("data/Park_Dest.csv")
@@ -75,64 +73,32 @@ dist <- read.csv("data/dist_sa_gp.csv")
 distpk <- read.csv("data/dist_sa_pk1.csv")
 disbs <- read.csv("data/dist_sa_bs.csv")
 
-################################################################################
-# OPTIONAL: Calculate Travel Time Matrices Using r5r
-################################################################################
-# NOTE: This section is commented out because it requires significant 
-# computational time. Pre-calculated matrices are provided in the data folder.
-# Uncomment and modify if you want to recalculate travel times.
+# Environmental health data
+noise <- read.csv("data/NoiseContours_2011_Dissolved_SA2022_Intersection_Area.csv")
+air <- read.csv("data/SA2022_Dublin_Postcode_greenR_AirView_Noise_GS_distroad_GP_NO_TUNNEL_airviewmedians.csv")
 
-# data_path <- "./data/dublinpoa"
-# o_sa <- fread(file.path(data_path, "SA_Origin.csv"))
-# d_gp <- fread(file.path(data_path, "GP_Dest.csv"))
-# d_pk <- fread(file.path(data_path, "Park_Dest_Points.csv"))
-# d_bs <- fread(file.path(data_path, "Blue_Dest.csv"))
-# 
-# options(java.parameters = "-Xmx10G")
-# r5r_core <- setup_r5(data_path = data_path, verbose = FALSE)
-# 
-# walk_speed <- 5
-# bike_speed <- 18
-# max_trip_duration <- 45
-# departure_datetime <- as.POSIXct("29-11-2022 09:00:00", 
-#                                  format = "%d-%m-%Y %H:%M:%S")
-# mode <- c("CAR")
-# 
-# dist <- travel_time_matrix(r5r_core = r5r_core,
-#                            origins = o_sa, destinations = d_gp,
-#                            mode = mode, departure_datetime = departure_datetime,
-#                            time_window = 1, max_trip_duration = max_trip_duration,
-#                            walk_speed = walk_speed, bike_speed = bike_speed,
-#                            verbose = FALSE)
-# 
-# distbs <- travel_time_matrix(r5r_core = r5r_core,
-#                              origins = o_sa, destinations = d_bs,
-#                              mode = mode, departure_datetime = departure_datetime,
-#                              time_window = 1, max_trip_duration = max_trip_duration,
-#                              walk_speed = walk_speed, bike_speed = bike_speed,
-#                              verbose = FALSE)
-# 
-# max_trip_duration <- 15
-# distpk <- travel_time_matrix(r5r_core = r5r_core,
-#                              origins = o_sa, destinations = d_pk,
-#                              mode = mode, departure_datetime = departure_datetime,
-#                              time_window = 1, max_trip_duration = max_trip_duration,
-#                              walk_speed = walk_speed, bike_speed = bike_speed,
-#                              verbose = FALSE)
-# 
-# stop_r5(r5r_core)
-# rJava::.jgc(R.gc = TRUE)
+# Irish life table for YLL calculations
+life_table <- read.csv("data/irish_life_table.csv")
+life_table <- life_table[, c("Age", "Sex", "LifeExpectancy")]
 
 ################################################################################
-# KEY COMPONENT 1: Enhanced Two-Step Floating Catchment Area (E2SFCA) 
-# Multiple GP Accessibility Metrics
+# 4. GP ACCESSIBILITY (Enhanced 2SFCA)
 ################################################################################
 
-cat("\n=== CALCULATING GP ACCESSIBILITY METRICS ===\n")
+cat("\n=== CALCULATING GP ACCESSIBILITY ===\n")
 
-# Distance decay function for accessibility calculations
+# Adjust GP supply by county (per-capita ratios)
+gp <- gp %>%
+  mutate(SUPPLY = case_when(
+    COUNTY_ENG == "SOUTH DUBLIN" ~ 2.106383676,
+    COUNTY_ENG == "FINGAL" ~ 2.259737083,
+    COUNTY_ENG == "DUBLIN CITY" ~ 1.330671623,
+    COUNTY_ENG == "DUN LAOGHAIRE/RATHDOWN" ~ 1.730009988,
+    TRUE ~ SUPPLY
+  ))
+
+# Distance decay functions
 calculate_decay_weight <- function(travel_time, method = "multi_zone") {
-  
   if (method == "multi_zone") {
     # Three-zone decay (Luo & Qi 2009)
     weight <- case_when(
@@ -142,28 +108,24 @@ calculate_decay_weight <- function(travel_time, method = "multi_zone") {
       TRUE ~ 0
     )
   } else if (method == "gaussian") {
-    # Gaussian decay
+    # Gaussian decay (Bauer & Groneberg 2016)
     d0 <- 20
     weight <- exp(-(travel_time^2) / (2*d0^2))
     weight <- ifelse(travel_time > 30, 0, weight)
   } else if (method == "kernel") {
-    # Kernel density function
+    # Epanechnikov kernel (Dai & Wang 2011)
     d0 <- 30
-    weight <- ifelse(travel_time < d0,
-                     (3/4) * (1 - (travel_time/d0)^2),
-                     0)
+    weight <- ifelse(travel_time < d0, (3/4) * (1 - (travel_time/d0)^2), 0)
   } else {
-    # Binary (traditional 2SFCA)
+    # Binary (traditional 2SFCA - Luo & Wang 2003)
     weight <- ifelse(travel_time <= 30, 1, 0)
   }
-  
   return(weight)
 }
 
-# Step 1: Calculate provider-to-population ratios
+# E2SFCA Step 1: Provider-to-population ratios
 step1_provider_ratios <- function(travel_time_matrix, demand_data, supply_data, 
                                   max_travel_time = 30, decay_method = "multi_zone") {
-  
   ttm_filtered <- travel_time_matrix %>%
     filter(travel_time <= max_travel_time)
   
@@ -183,19 +145,15 @@ step1_provider_ratios <- function(travel_time_matrix, demand_data, supply_data,
   
   provider_ratios <- supply_data %>%
     left_join(weighted_demand, by = "destination_id") %>%
-    mutate(
-      ratio = ifelse(total_weighted_demand > 0, 
-                     capacity / total_weighted_demand, 
-                     0)
-    )
+    mutate(ratio = ifelse(total_weighted_demand > 0, 
+                         capacity / total_weighted_demand, 0))
   
   return(provider_ratios)
 }
 
-# Step 2: Calculate accessibility scores
+# E2SFCA Step 2: Accessibility scores
 step2_accessibility <- function(travel_time_matrix, provider_ratios, 
                                 max_travel_time = 30, decay_method = "multi_zone") {
-  
   ttm_filtered <- travel_time_matrix %>%
     filter(travel_time <= max_travel_time)
   
@@ -203,10 +161,7 @@ step2_accessibility <- function(travel_time_matrix, provider_ratios,
     mutate(weight = calculate_decay_weight(travel_time, method = decay_method))
   
   ttm_with_ratios <- ttm_weighted %>%
-    left_join(
-      provider_ratios %>% select(destination_id, ratio),
-      by = "destination_id"
-    )
+    left_join(provider_ratios %>% select(destination_id, ratio), by = "destination_id")
   
   accessibility_scores <- ttm_with_ratios %>%
     group_by(origin_id) %>%
@@ -219,20 +174,17 @@ step2_accessibility <- function(travel_time_matrix, provider_ratios,
   return(accessibility_scores)
 }
 
-# Complete E2SFCA function
+# Complete E2SFCA workflow
 e2sfca_analysis <- function(travel_time_matrix, demand_data, supply_data,
                             max_travel_time = 30, decay_method = "multi_zone") {
-  
   cat("  Calculating provider ratios...\n")
   provider_ratios <- step1_provider_ratios(
-    travel_time_matrix, demand_data, supply_data,
-    max_travel_time, decay_method
+    travel_time_matrix, demand_data, supply_data, max_travel_time, decay_method
   )
   
   cat("  Calculating accessibility scores...\n")
   accessibility_scores <- step2_accessibility(
-    travel_time_matrix, provider_ratios,
-    max_travel_time, decay_method
+    travel_time_matrix, provider_ratios, max_travel_time, decay_method
   )
   
   final_results <- accessibility_scores %>%
@@ -247,25 +199,25 @@ e2sfca_analysis <- function(travel_time_matrix, demand_data, supply_data,
 # Prepare data for E2SFCA
 demand_data <- sa %>%
   select(id, T1_1AGETT) %>%
-  rename(origin_id = id, population = T1_1AGETT)
-demand_data$origin_id <- as.character(demand_data$origin_id)
+  rename(origin_id = id, population = T1_1AGETT) %>%
+  mutate(origin_id = as.character(origin_id))
 
 supply_data <- gp %>%
   select(id, SUPPLY) %>%
-  rename(destination_id = id, capacity = SUPPLY)
-supply_data$destination_id <- as.character(supply_data$destination_id)
+  rename(destination_id = id, capacity = SUPPLY) %>%
+  mutate(destination_id = as.character(destination_id))
 
 dist <- dist %>%
-  rename(origin_id = from_id, destination_id = to_id, travel_time = travel_time_p50)
-dist$origin_id <- as.character(dist$origin_id)
-dist$destination_id <- as.character(dist$destination_id)
+  rename(origin_id = from_id, destination_id = to_id, travel_time = travel_time_p50) %>%
+  mutate(origin_id = as.character(origin_id), 
+         destination_id = as.character(destination_id))
 
 # Calculate accessibility using multiple decay methods
 decay_methods <- c("multi_zone", "gaussian", "kernel", "binary")
 gp_access_results <- list()
 
 for (method in decay_methods) {
-  cat(paste0("\nCalculating GP accessibility with ", method, " decay...\n"))
+  cat(paste0("\nCalculating GP accessibility: ", method, " decay\n"))
   results <- e2sfca_analysis(
     travel_time_matrix = dist,
     demand_data = demand_data,
@@ -286,39 +238,37 @@ for (method in decay_methods) {
     rename_with(~paste0(suffix, "_2s"), accessibility)
 }
 
-# Merge all GP accessibility metrics into sa dataframe
+# Merge all GP accessibility metrics
 for (method in decay_methods) {
   sa <- merge(sa, gp_access_results[[method]], by = "id", all.x = TRUE)
 }
 
-cat("\nGP accessibility metrics calculated successfully.\n")
+cat("GP accessibility metrics calculated.\n")
 
 ################################################################################
-# KEY COMPONENT 2: Blue Space Accessibility
+# 5. BLUE SPACE ACCESSIBILITY
 ################################################################################
 
 cat("\n=== CALCULATING BLUE SPACE ACCESSIBILITY ===\n")
 
-# Find nearest coastline point for each small area
+# Find nearest coastline point
 nearestbs <- disbs %>%
   group_by(from_id) %>%
   slice_min(travel_time_p50, n = 1, with_ties = FALSE) %>%
   ungroup() %>%
   rename(id = from_id)
 
-# Apply Gaussian decay
+# Apply Gaussian decay (sigma = 20 minutes)
 sigma <- 20
 nearestbs$bs_access <- exp(-(nearestbs$travel_time_p50^2) / (2*sigma^2))
 
-nearestbs <- nearestbs %>%
-  select(id, bs_access)
-
+nearestbs <- nearestbs %>% select(id, bs_access)
 sa <- merge(sa, nearestbs, by = "id", all.x = TRUE)
 
-cat("Blue space accessibility calculated successfully.\n")
+cat("Blue space accessibility calculated.\n")
 
 ################################################################################
-# KEY COMPONENT 3: Green Space Accessibility
+# 6. GREEN SPACE ACCESSIBILITY
 ################################################################################
 
 cat("\n=== CALCULATING GREEN SPACE ACCESSIBILITY ===\n")
@@ -331,7 +281,7 @@ df_sf <- st_as_sf(o_sa, coords = c("lon", "lat"), crs = 4326)
 parks_poly <- st_transform(parks_poly, 4326)
 parks_poly <- st_make_valid(parks_poly)
 
-# Assign maximum accessibility (5) to points within parks
+# Maximum accessibility for points within parks
 within_park <- lengths(st_intersects(df_sf, parks_poly)) > 0
 df_sf$gs_access <- NA
 df_sf$gs_access[within_park] <- 5
@@ -340,34 +290,33 @@ df_sf$gs_access[within_park] <- 5
 outside_ids <- df_sf$id[!within_park]
 
 if (length(outside_ids) > 0) {
-  distpk_outside <- distpk %>%
-    filter(from_id %in% outside_ids)
+  distpk_outside <- distpk %>% filter(from_id %in% outside_ids)
   
   pk <- pk %>%
-    select(id, Name)
-  pk$id <- as.character(pk$id)
+    select(id, Name) %>%
+    mutate(id = as.character(id))
   
   distpk_outside <- merge(distpk_outside, pk, by.x = "to_id", by.y = "id")
   distpk_outside$Name[distpk_outside$Name == ""] <- "NA"
   
-  # Find minimum time to each park
+  # Minimum time to each unique park
   min_times <- distpk_outside %>%
     group_by(from_id, Name) %>%
     summarise(min_time = min(travel_time_p50), .groups = 'drop')
   
-  # Find the 5 nearest parks per origin
+  # Find 5 nearest parks per origin
   nearest_5 <- min_times %>%
     group_by(from_id) %>%
     arrange(min_time) %>%
     slice_head(n = 5) %>%
     ungroup()
   
-  # Apply Gaussian decay
+  # Apply Gaussian decay (sigma = 5 minutes)
   sigma <- 5
   nearest_5 <- nearest_5 %>%
     mutate(decayed = exp(-(min_time^2) / (2 * sigma^2)))
   
-  # Sum decayed values per origin
+  # Sum decayed values
   gs_access_calculated <- nearest_5 %>%
     group_by(from_id) %>%
     summarise(gs_access = sum(decayed), .groups = 'drop')
@@ -376,7 +325,7 @@ if (length(outside_ids) > 0) {
   df_sf <- df_sf %>%
     left_join(gs_access_calculated, by = c("id" = "from_id"))
   
-  # Combine: keep 5 for parks, use calculated for others
+  # Combine: 5 for parks, calculated for others
   df_sf <- df_sf %>%
     mutate(gs_access = coalesce(gs_access.x, gs_access.y)) %>%
     select(-gs_access.x, -gs_access.y)
@@ -385,32 +334,22 @@ if (length(outside_ids) > 0) {
 o_sa <- st_drop_geometry(df_sf)
 sa <- merge(sa, o_sa %>% select(id, gs_access), by = "id", all.x = TRUE)
 
-cat("Green space accessibility calculated successfully.\n")
+cat("Green space accessibility calculated.\n")
 
-#Save accessibility results
+# Save accessibility results
 sa_access <- sa %>%
   select(id, SA_PUB202, mz_2s, gaus_2s, kern_2s, bin_2s, bs_access, gs_access)
 
 ################################################################################
-# KEY COMPONENT 4: Years of Life Lost (YLL) Calculations
+# 7. YEARS OF LIFE LOST (YLL) CALCULATIONS
 ################################################################################
 
 cat("\n=== CALCULATING YEARS OF LIFE LOST ===\n")
 
-# Load noise and air quality data
-noise <- read.csv("data/NoiseContours_2011_Dissolved_SA2022_Intersection_Area.csv")
-air <- read.csv("data/SA2022_Dublin_Postcode_greenR_AirView_Noise_GS_distroad_GP_NO_TUNNEL_airviewmedians.csv")
+## AIR POLLUTION YLL ##
+cat("Air pollution YLL...\n")
 
-## AIR POLLUTION YLL CALCULATION ##
-cat("\nCalculating air pollution-related years of life lost...\n")
-
-# Calculate population aged 30+
-air$POP30P <- air$T1_1AGE3_1 + air$T1_1AGE3_2 + air$T1_1AGE4_1 + 
-  air$T1_1AGE4_2 + air$T1_1AGE5_1 + air$T1_1AGE5_2 + 
-  air$T1_1AGE6_1 + air$T1_1AGE6_2 + air$T1_1AGE7_1 + 
-  air$T1_1AGE7_2 + air$T1_1AGE8_1 + air$T1_1AGEG_1
-
-# Relative risks using WHO guidelines (WHO 2022)
+# Relative risks (WHO 2021 Air Quality Guidelines)
 air$RRPM25 <- ifelse(!is.na(air$PM25_media) & air$PM25_media >= 5,
                      (((air$PM25_media - 5) / 10) * 0.08) + 1, 1)
 
@@ -421,76 +360,11 @@ air$RRO3 <- ifelse(!is.na(air$O3_median) & air$O3_median >= 71.05,
                    (((air$O3_median - 71.05) / 10) * 0.0043) + 1, 1)
 
 # Population attributable fractions
-air$PAFPM25 <- (air$RRPM25-1) / air$RRPM25
-air$PAFNO2 <- (air$RRNO2-1) / air$RRNO2
-air$PAFO3 <- (air$RRO3-1) / air$RRO3
+air$PAFPM25 <- (air$RRPM25 - 1) / air$RRPM25
+air$PAFNO2 <- (air$RRNO2 - 1) / air$RRNO2
+air$PAFO3 <- (air$RRO3 - 1) / air$RRO3
 
-# All-cause mortality rates (from Irish vital statistics)
-CDRAll17 <- 0.005917
-CDRAll17_f <- 0.0058954
-CDRAll17_m <- 0.0059396
-CDR3017 <- 0.009650213
-CDR3017_f <- 0.009460165
-CDR3017_m <- 0.009858216
-
-## Calculate life expectancy for exposed populations ##
-
-# Age midpoints for calculation
-age_midpoints_all <- c(.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 
-                       10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5, 17.5, 18.5, 
-                       19.5, 22, 27, 32, 37, 42, 47, 52, 57, 62, 67, 72, 77, 
-                       82, 87)
-age_midpoints_30P <- c(32, 37, 42, 47, 52, 57, 62, 67, 72, 77, 82, 87)
-
-# Define age columns
-start_col_all_f <- "T1_1AGE0F"
-start_col_30P_f <- "T1_1AGE301"
-end_col_f <- "T1_1AGEGE1"
-
-start_col_all_m <- "T1_1AGE0M"
-start_col_30P_m <- "T1_1AGE30_"
-end_col_m <- "T1_1AGEGE_"
-
-age_cols_all_f <- names(air)[which(names(air) == start_col_all_f):
-                                which(names(air) == end_col_f)]
-age_cols_30P_f <- names(air)[which(names(air) == start_col_30P_f):
-                                which(names(air) == end_col_f)]
-age_cols_all_m <- names(air)[which(names(air) == start_col_all_m):
-                                which(names(air) == end_col_m)]
-age_cols_30P_m <- names(air)[which(names(air) == start_col_30P_m):
-                                which(names(air) == end_col_m)]
-
-# Weight ages by population
-age_weighted_all_f <- air[, age_cols_all_f] * 
-                      rep(age_midpoints_all, each = nrow(air))
-age_weighted_30P_f <- air[, age_cols_30P_f] * 
-                      rep(age_midpoints_30P, each = nrow(air))
-age_weighted_all_m <- air[, age_cols_all_m] * 
-                      rep(age_midpoints_all, each = nrow(air))
-age_weighted_30P_m <- air[, age_cols_30P_m] * 
-                      rep(age_midpoints_30P, each = nrow(air))
-
-weighted_sum_all_f <- rowSums(age_weighted_all_f, na.rm = TRUE)
-weighted_sum_30P_f <- rowSums(age_weighted_30P_f, na.rm = TRUE)
-weighted_sum_all_m <- rowSums(age_weighted_all_m, na.rm = TRUE)
-weighted_sum_30P_m <- rowSums(age_weighted_30P_m, na.rm = TRUE)
-
-air$total_pop_all_f <- rowSums(air[, age_cols_all_f], na.rm = TRUE)
-air$total_pop_30P_f <- rowSums(air[, age_cols_30P_f], na.rm = TRUE)
-air$total_pop_all_m <- rowSums(air[, age_cols_all_m], na.rm = TRUE)
-air$total_pop_30P_m <- rowSums(air[, age_cols_30P_m], na.rm = TRUE)
-
-# Calculate average age by sex and age group
-air$avg_age_all_f <- weighted_sum_all_f / air$total_pop_all_f
-air$avg_age_30P_f <- weighted_sum_30P_f / air$total_pop_30P_f
-air$avg_age_all_m <- weighted_sum_all_m / air$total_pop_all_m
-air$avg_age_30P_m <- weighted_sum_30P_m / air$total_pop_30P_m
-
-# Load Irish life table
-life_table <- read.csv("data/irish_life_table.csv")
-life_table <- life_table[, c("Age", "Sex", "LifeExpectancy")]
-
-# Function to interpolate life expectancy
+# Life expectancy interpolation
 get_life_expectancy <- function(avg_age, sex, life_table) {
   if (is.na(avg_age)) return(NA)
   
@@ -514,47 +388,175 @@ get_life_expectancy <- function(avg_age, sex, life_table) {
   le_upper <- lt_sex$LifeExpectancy[upper_idx]
   
   le_interp <- le_lower + (le_upper - le_lower) * 
-               (avg_age - age_lower) / (age_upper - age_lower)
+    (avg_age - age_lower) / (age_upper - age_lower)
   
   return(le_interp)
 }
 
-# Calculate life expectancy for each small area
-air$LE_all_m <- sapply(air$avg_age_all_m, get_life_expectancy, 
-                       sex="Male", life_table=life_table)
-air$LE_all_f <- sapply(air$avg_age_all_f, get_life_expectancy, 
-                       sex="Female", life_table=life_table)
-air$LE_30P_m <- sapply(air$avg_age_30P_m, get_life_expectancy, 
-                       sex="Male", life_table=life_table)
-air$LE_30P_f <- sapply(air$avg_age_30P_f, get_life_expectancy, 
-                       sex="Female", life_table=life_table)
+# Age-sex specific mortality rates (Ireland 2017, CSO DHA13)
+mortality_rates <- data.frame(
+  AgeGroup = c("0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39", 
+               "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", 
+               "75-79", "80-84", "85+"),
+  Female = c(0.0006601, 0.0000886, 0.0000521, 0.0000519, 0.0000925, 0.0002121,
+             0.0002898, 0.00054, 0.0007498, 0.0011977, 0.0019599, 0.0032209,
+             0.0064141, 0.0080121, 0.015255, 0.0281099, 0.0499962, 0.13867),
+  Male = c(0.0005456, 0, 0.0000996, 0.0001769, 0.0004129, 0.0004458,
+           0.0004142, 0.0009302, 0.0011782, 0.0022411, 0.0037875, 0.0054263,
+           0.008684, 0.0146503, 0.0226823, 0.0425332, 0.0705163, 0.1520202)
+)
 
-# Calculate Years of Life Lost (YLL)
-air$YLLPM25 <- (air$PAFPM25 * air$total_pop_30P_f * CDR3017_f * air$LE_30P_f) +
-               (air$PAFPM25 * air$total_pop_30P_m * CDR3017_m * air$LE_30P_m)
+# Map census columns to mortality bands
+age_band_mapping <- list(
+  "0-4" = list(
+    female_cols = c("T1_1AGE0F", "T1_1AGE1F", "T1_1AGE2F", "T1_1AGE3F", "T1_1AGE4F"),
+    male_cols = c("T1_1AGE0M", "T1_1AGE1M", "T1_1AGE2M", "T1_1AGE3M", "T1_1AGE4M"),
+    age_midpoint = 2.5
+  ),
+  "5-9" = list(
+    female_cols = c("T1_1AGE5F", "T1_1AGE6F", "T1_1AGE7F", "T1_1AGE8F", "T1_1AGE9F"),
+    male_cols = c("T1_1AGE5M", "T1_1AGE6M", "T1_1AGE7M", "T1_1AGE8M", "T1_1AGE9M"),
+    age_midpoint = 7.5
+  ),
+  "10-14" = list(
+    female_cols = c("T1_1AGE10F", "T1_1AGE11F", "T1_1AGE12F", "T1_1AGE13F", "T1_1AGE14F"),
+    male_cols = c("T1_1AGE10M", "T1_1AGE11M", "T1_1AGE12M", "T1_1AGE13M", "T1_1AGE14M"),
+    age_midpoint = 12.5
+  ),
+  "15-19" = list(
+    female_cols = c("T1_1AGE15F", "T1_1AGE16F", "T1_1AGE17F", "T1_1AGE18F", "T1_1AGE19F"),
+    male_cols = c("T1_1AGE15M", "T1_1AGE16M", "T1_1AGE17M", "T1_1AGE18M", "T1_1AGE19M"),
+    age_midpoint = 17.5
+  ),
+  "20-24" = list(
+    female_cols = "T1_1AGE201",
+    male_cols = "T1_1AGE20_",
+    age_midpoint = 22.5
+  ),
+  "25-29" = list(
+    female_cols = "T1_1AGE251",
+    male_cols = "T1_1AGE25_",
+    age_midpoint = 27.5
+  ),
+  "30-34" = list(
+    female_cols = "T1_1AGE301",
+    male_cols = "T1_1AGE30_",
+    age_midpoint = 32.5
+  ),
+  "35-39" = list(
+    female_cols = "T1_1AGE351",
+    male_cols = "T1_1AGE35_",
+    age_midpoint = 37.5
+  ),
+  "40-44" = list(
+    female_cols = "T1_1AGE401",
+    male_cols = "T1_1AGE40_",
+    age_midpoint = 42.5
+  ),
+  "45-49" = list(
+    female_cols = "T1_1AGE451",
+    male_cols = "T1_1AGE45_",
+    age_midpoint = 47.5
+  ),
+  "50-54" = list(
+    female_cols = "T1_1AGE501",
+    male_cols = "T1_1AGE50_",
+    age_midpoint = 52.5
+  ),
+  "55-59" = list(
+    female_cols = "T1_1AGE551",
+    male_cols = "T1_1AGE55_",
+    age_midpoint = 57.5
+  ),
+  "60-64" = list(
+    female_cols = "T1_1AGE601",
+    male_cols = "T1_1AGE60_",
+    age_midpoint = 62.5
+  ),
+  "65-69" = list(
+    female_cols = "T1_1AGE651",
+    male_cols = "T1_1AGE65_",
+    age_midpoint = 67.5
+  ),
+  "70-74" = list(
+    female_cols = "T1_1AGE701",
+    male_cols = "T1_1AGE70_",
+    age_midpoint = 72.5
+  ),
+  "75-79" = list(
+    female_cols = "T1_1AGE751",
+    male_cols = "T1_1AGE75_",
+    age_midpoint = 77.5
+  ),
+  "80-84" = list(
+    female_cols = "T1_1AGE801",
+    male_cols = "T1_1AGE80_",
+    age_midpoint = 82.5
+  ),
+  "85+" = list(
+    female_cols = "T1_1AGEGE1",
+    male_cols = "T1_1AGEGE_",
+    age_midpoint = 87
+  )
+)
 
-air$YLLNO2 <- (air$PAFNO2 * air$total_pop_30P_f * CDR3017_f * air$LE_30P_f) +
-              (air$PAFNO2 * air$total_pop_30P_m * CDR3017_m * air$LE_30P_m)
+# Calculate stratified YLL
+calculate_stratified_yll <- function(data, paf_col, age_range = "all") {
+  total_yll <- numeric(nrow(data))
+  
+  # Determine age bands
+  if (age_range == "30+") {
+    bands_to_use <- mortality_rates$AgeGroup[mortality_rates$AgeGroup >= "30-34"]
+  } else {
+    bands_to_use <- mortality_rates$AgeGroup
+  }
+  
+  # Loop through each age-sex band
+  for (i in 1:nrow(mortality_rates)) {
+    age_group <- mortality_rates$AgeGroup[i]
+    
+    if (!(age_group %in% bands_to_use)) next
+    
+    # Get mortality rates
+    mort_f <- mortality_rates$Female[i]
+    mort_m <- mortality_rates$Male[i]
+    
+    # Get life expectancy
+    age_mid <- age_band_mapping[[age_group]]$age_midpoint
+    le_f <- get_life_expectancy(age_mid, "Female", life_table)
+    le_m <- get_life_expectancy(age_mid, "Male", life_table)
+    
+    # Get population
+    female_cols <- age_band_mapping[[age_group]]$female_cols
+    male_cols <- age_band_mapping[[age_group]]$male_cols
+    
+    pop_f <- rowSums(data[, female_cols, drop = FALSE], na.rm = TRUE)
+    pop_m <- rowSums(data[, male_cols, drop = FALSE], na.rm = TRUE)
+    
+    # Calculate YLL for this stratum
+    yll_stratum <- (pop_f * mort_f * le_f) + (pop_m * mort_m * le_m)
+    total_yll <- total_yll + yll_stratum
+  }
+  
+  # Apply PAF
+  total_yll <- total_yll * data[[paf_col]]
+  
+  return(total_yll)
+}
 
-air$YLLO3 <- (air$PAFO3 * air$total_pop_all_f * CDRAll17_f * air$LE_all_f) +
-             (air$PAFO3 * air$total_pop_all_m * CDRAll17_m * air$LE_all_m)
+# Calculate air pollution YLL (age 30+ for PM2.5/NO2, all ages for O3)
+air$YLLPM25 <- calculate_stratified_yll(air, "PAFPM25", age_range = "30+")
+air$YLLNO2 <- calculate_stratified_yll(air, "PAFNO2", age_range = "30+")
+air$YLLO3 <- calculate_stratified_yll(air, "PAFO3", age_range = "all")
 
 air$YLLAQ <- air$YLLPM25 + air$YLLNO2 + air$YLLO3
 
-# Simplify air data
-air <- air %>%
-  select(SA_PUB2022, POP30P, SHAPE_Area, T1_1AGETT, T6_2_TH, total_pop_all_f, total_pop_all_m, LE_all_m, 
-         LE_all_f, LE_30P_m, LE_30P_f,YLLPM25, YLLNO2, YLLO3, YLLAQ, 
-         T10_4_OD_2, T10_4_HD_2, T10_4_PDT,T10_4_DT, T10_4_TT, T11_1_FT, 
-         T11_1_BIT,T11_1_BUT, T11_1_TDLT,T11_1_TT, T12_3_BT, T12_3_VBT, 
-         T12_3_TT,T1_1AGE6_1,T1_1AGE6_2,T1_1AGE7_1, T1_1AGE7_2,
-         T1_1AGE8_1,T1_1AGEG_1,T2_1IEC,T2_1TC)
-
 cat("  Total YLL from air pollution:", round(sum(air$YLLAQ, na.rm=TRUE), 2), "\n")
 
-## NOISE YLL CALCULATION ##
-cat("\nCalculating noise-related years of life lost...\n")
+## NOISE YLL ##
+cat("Noise YLL...\n")
 
+# Process noise data
 noise_d <- noise %>%
   spread(DBs, area) %>%
   select(SA_PUB2022, `55`, `60`, `65`, `70`, `75`)
@@ -565,43 +567,77 @@ noise_w <- noise_d %>%
 
 air <- merge(air, noise_w, by = "SA_PUB2022", all.x = TRUE)
 
-# Calculate proportion of area exposed to each noise level
+# Proportion of area exposed to each noise level
 air$D55_P <- air$`55`/air$SHAPE_Area
 air$D60_P <- air$`60`/air$SHAPE_Area
 air$D65_P <- air$`65`/air$SHAPE_Area
 air$D70_P <- air$`70`/air$SHAPE_Area
 air$D75_P <- air$`75`/air$SHAPE_Area
 
-# Replace NA with 0
-air$D55_P[is.na(air$D55_P)] <- 0
-air$D60_P[is.na(air$D60_P)] <- 0
-air$D65_P[is.na(air$D65_P)] <- 0
-air$D70_P[is.na(air$D70_P)] <- 0
-air$D75_P[is.na(air$D75_P)] <- 0
+air[, c("D55_P", "D60_P", "D65_P", "D70_P", "D75_P")][
+  is.na(air[, c("D55_P", "D60_P", "D65_P", "D70_P", "D75_P")])] <- 0
 
-# Odds ratios for noise levels (WHO 2022)
+# Odds ratios for noise levels (WHO 2018)
 air$OR55 <- ifelse(air$D55_P==0, 1, 1.000195)
 air$OR60 <- ifelse(air$D60_P==0, 1, 1.01296)
 air$OR65 <- ifelse(air$D65_P==0, 1, 1.061315)
 air$OR70 <- ifelse(air$D70_P==0, 1, 1.15078)
 air$OR75 <- ifelse(air$D75_P==0, 1, 1.286875)
 
-# Background IHD rates (from Irish vital statistics)
-Ik <- 0.000654
-Ik_f <- 0.000449
-Ik_m <- 0.000868
+# IHD mortality rates (Ireland 2017, CSO DHA11)
+ihd_mortality_rates <- data.frame(
+  AgeGroup = c("0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39", 
+               "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", 
+               "75-79", "80-84", "85+"),
+  Female = c(0, 0, 0, 0, 0, 0, 0.0000055, 0.000005, 0.0000273, 0.0000539,
+             0.0001371, 0.0001954, 0.0004435, 0.0006484, 0.0012399, 0.0028503,
+             0.0061533, 0.0210593),
+  Male = c(0, 0, 0, 0, 0, 0, 0.000018, 0.0000727, 0.0001722, 0.0003309,
+           0.0005262, 0.000979, 0.0014019, 0.002289, 0.0038114, 0.0069162,
+           0.0112589, 0.0286301)
+)
 
-# Noise YLL
-air$YLL55 <- ((air$OR55-1) * air$total_pop_all_f * Ik_f * air$D55_P * air$LE_all_f) +
-             ((air$OR55-1) * air$total_pop_all_m * Ik_m * air$D55_P * air$LE_all_m)
-air$YLL60 <- ((air$OR60-1) * air$total_pop_all_f * Ik_f * air$D60_P * air$LE_all_f) +
-             ((air$OR60-1) * air$total_pop_all_m * Ik_m * air$D60_P * air$LE_all_m)
-air$YLL65 <- ((air$OR65-1) * air$total_pop_all_f * Ik_f * air$D65_P * air$LE_all_f) +
-             ((air$OR65-1) * air$total_pop_all_m * Ik_m * air$D65_P * air$LE_all_m)
-air$YLL70 <- ((air$OR70-1) * air$total_pop_all_f * Ik_f * air$D70_P * air$LE_all_f) +
-             ((air$OR70-1) * air$total_pop_all_m * Ik_m * air$D70_P * air$LE_all_m)
-air$YLL75 <- ((air$OR75-1) * air$total_pop_all_f * Ik_f * air$D75_P * air$LE_all_f) +
-             ((air$OR75-1) * air$total_pop_all_m * Ik_m * air$D75_P * air$LE_all_m)
+# Calculate stratified noise YLL
+calculate_noise_yll <- function(data, or_col, prop_exposed_col) {
+  total_yll <- numeric(nrow(data))
+  
+  for (i in 1:nrow(ihd_mortality_rates)) {
+    age_group <- ihd_mortality_rates$AgeGroup[i]
+    
+    # Get IHD mortality rates
+    mort_ihd_f <- ihd_mortality_rates$Female[i]
+    mort_ihd_m <- ihd_mortality_rates$Male[i]
+    
+    if (mort_ihd_f == 0 && mort_ihd_m == 0) next
+    
+    # Get life expectancy
+    age_mid <- age_band_mapping[[age_group]]$age_midpoint
+    le_f <- get_life_expectancy(age_mid, "Female", life_table)
+    le_m <- get_life_expectancy(age_mid, "Male", life_table)
+    
+    # Get population
+    female_cols <- age_band_mapping[[age_group]]$female_cols
+    male_cols <- age_band_mapping[[age_group]]$male_cols
+    
+    pop_f <- rowSums(data[, female_cols, drop = FALSE], na.rm = TRUE)
+    pop_m <- rowSums(data[, male_cols, drop = FALSE], na.rm = TRUE)
+    
+    # Calculate YLL: (OR - 1) × IHD_mortality × Population × Proportion_exposed × LE
+    yll_stratum <- ((data[[or_col]] - 1) * mort_ihd_f * pop_f * data[[prop_exposed_col]] * le_f) +
+      ((data[[or_col]] - 1) * mort_ihd_m * pop_m * data[[prop_exposed_col]] * le_m)
+    
+    total_yll <- total_yll + yll_stratum
+  }
+  
+  return(total_yll)
+}
+
+# Calculate noise YLL for each exposure level
+air$YLL55 <- calculate_noise_yll(air, "OR55", "D55_P")
+air$YLL60 <- calculate_noise_yll(air, "OR60", "D60_P")
+air$YLL65 <- calculate_noise_yll(air, "OR65", "D65_P")
+air$YLL70 <- calculate_noise_yll(air, "OR70", "D70_P")
+air$YLL75 <- calculate_noise_yll(air, "OR75", "D75_P")
 
 air$YLLN <- air$YLL55 + air$YLL60 + air$YLL65 + air$YLL70 + air$YLL75
 
@@ -611,8 +647,7 @@ cat("  Total YLL from noise pollution:", round(sum(air$YLLN, na.rm=TRUE), 2), "\
 air$YLLAQ[is.na(air$YLLAQ)] <- 0
 air$YLLN[is.na(air$YLLN)] <- 0
 
-# OUTPUT: Save total YLL
-cat("\n=== OUTPUT 1: TOTAL YEARS OF LIFE LOST ===\n")
+# Save total YLL summary
 total_yll <- data.frame(
   Source = c("Air Pollution (PM2.5, NO2, O3)", "Road Noise (55-75+ dB)"),
   Total_YLL = c(sum(air$YLLAQ, na.rm=TRUE), sum(air$YLLN, na.rm=TRUE))
@@ -620,11 +655,37 @@ total_yll <- data.frame(
 print(total_yll)
 write.csv(total_yll, "output/total_years_life_lost.csv", row.names = FALSE)
 
+# Calculate population-weighted average age
+age_cols_all <- c(paste0("T1_1AGE", 0:19, "M"), 
+                  paste0("T1_1AGE", c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80), "_"),
+                  "T1_1AGEGE_",
+                  paste0("T1_1AGE", 0:19, "F"),
+                  paste0("T1_1AGE", c(20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80), "1"),
+                  "T1_1AGEGE1")
+
+age_midpoints_all <- c(0:19, 22, 27, 32, 37, 42, 47, 52, 57, 62, 67, 72, 77, 82, 87,
+                       0:19, 22, 27, 32, 37, 42, 47, 52, 57, 62, 67, 72, 77, 82, 87)
+
+age_weighted <- air[, age_cols_all] * rep(age_midpoints_all, each = nrow(air))
+weighted_sum <- rowSums(age_weighted, na.rm = TRUE)
+total_pop <- rowSums(air[, age_cols_all], na.rm = TRUE)
+
+air$avg_age <- weighted_sum / total_pop
+
+# Simplify air data for merging
+air <- air %>%
+  select(SA_PUB2022, SHAPE_Area, T1_1AGETT, T6_2_TH,
+         YLLPM25, YLLNO2, YLLO3, YLLAQ, YLL55, YLL60, YLL65, YLL70, YLL75, YLLN,
+         T10_4_OD_2, T10_4_HD_2, T10_4_PDT, T10_4_DT, T10_4_TT, T11_1_FT,
+         T11_1_BIT, T11_1_BUT, T11_1_TDLT, T11_1_TT, T12_3_BT, T12_3_VBT,
+         T12_3_TT, T1_1AGE6_1, T1_1AGE6_2, T1_1AGE7_1, T1_1AGE7_2,
+         T1_1AGE8_1, T1_1AGEG_1, T2_1IEC, T2_1TC, avg_age)
+
 ################################################################################
-# KEY COMPONENT 5: Multiple Index Weighting Approaches
+# 8. INDEX WEIGHTING APPROACHES
 ################################################################################
 
-cat("\n=== TESTING MULTIPLE INDEX WEIGHTING APPROACHES ===\n")
+cat("\n=== CALCULATING HEALTH RATING INDEX ===\n")
 
 # Load spatial data
 SA <- st_read("data/SA2022_Dublin_AllData3.shp", quiet = TRUE) %>%
@@ -634,51 +695,57 @@ SA <- SA %>%
   left_join(sa_access, by = c("SA_PUB2022" = "SA_PUB202")) %>%
   left_join(air, by = "SA_PUB2022")
 
-summary(SA[, c("YLLAQ", "YLLN")])
-
 # Create rate variables
 SA$YLLAQPC <- (SA$YLLAQ / SA$T1_1AGETT) * 100000
 SA$YLLNPC <- (SA$YLLN / SA$T1_1AGETT) * 100000
-SA$ph_rate <- SA$total/SA$T6_2_TH
+SA$YLLPC <- ((SA$YLLN + SA$YLLAQ) / SA$T1_1AGETT) * 100000
+SA$ph_rate <- SA$total / SA$T6_2_TH
 SA$ph_rate[is.infinite(SA$ph_rate) | is.nan(SA$ph_rate)] <- 0
 SA$ph_rate <- pmin(SA$ph_rate, 1)
 
-# Function to calculate naive weights
+# Calculate excess YLL (age-adjusted burden)
+SA$avg_age_z <- scale(SA$avg_age)
+SA$YLLPC_z <- scale(SA$YLLPC)
+SA$excess_YLLPC <- SA$YLLPC_z - SA$avg_age_z
+
+# Function: Naive weights (equal)
 calc_naive <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
   
-  # Normalize to 0-1 first
   df_norm <- df_data %>%
     select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%
     mutate(across(everything(), ~ (. - min(.)) / (max(.) - min(.))))
   
-  # Flip the bad indicators
   df_norm <- df_norm %>%
-    mutate(
-      YLLAQPC = 1 - YLLAQPC,
-      YLLNPC = 1 - YLLNPC,
-      ph_rate = 1 - ph_rate
-    )
+    mutate(YLLAQPC = 1 - YLLAQPC, YLLNPC = 1 - YLLNPC, ph_rate = 1 - ph_rate)
   
-  # Simple average
   hri <- (1/6) * (df_norm[[gp_var]] + df_norm$gs_access + df_norm$bs_access + 
                     df_norm$YLLAQPC + df_norm$YLLNPC + df_norm$ph_rate)
   
-  # Scale to 0-1
   (hri - min(hri)) / (max(hri) - min(hri))
 }
 
-# Function to calculate entropy weights
+# Function: Entropy weights (Karagiannis & Karagiannis 2020)
 calc_entropy <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
-  df_norm <- df_data %>%
-    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%  # Added ph_rate
-    mutate(across(everything(), ~ (. - min(.)) / (max(.) - min(.)))) %>%
-    mutate(YLLAQPC = 1 - YLLAQPC, 
-           YLLNPC = 1 - YLLNPC,
-           ph_rate = 1 - ph_rate)  # Reverse ph_rate (higher = worse)
+  df_raw <- df_data %>%
+    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate")))
   
-  p <- df_norm / rowSums(df_norm)
+  # Robust normalization (5th-95th percentile)
+  df_norm <- df_raw %>%
+    mutate(across(everything(), ~ {
+      p05 <- quantile(., 0.05, na.rm = TRUE)
+      p95 <- quantile(., 0.95, na.rm = TRUE)
+      x_trimmed <- pmax(pmin(., p95), p05)
+      (x_trimmed - p05) / (p95 - p05)
+    }))
+  
+  df_norm <- df_norm %>%
+    mutate(YLLAQPC = 1 - YLLAQPC, YLLNPC = 1 - YLLNPC, ph_rate = 1 - ph_rate)
+  
+  # Shannon entropy weights
+  p <- sweep(df_norm, 2, colSums(df_norm), "/")
+  
   n <- nrow(df_norm)
   k <- 1 / log(n)
   p[p == 0] <- 1e-10
@@ -691,14 +758,14 @@ calc_entropy <- function(df, gp_var) {
   (index - min(index)) / (max(index) - min(index))
 }
 
-# Function to calculate PCA weights
+# Function: PCA variance weights (OECD 2008)
 calc_pca <- function(df, gp_var) {
   df_data <- st_drop_geometry(df)
   df_pca <- df_data %>%
-    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%  # Added ph_rate
+    select(all_of(c(gp_var, "gs_access", "bs_access", "YLLAQPC", "YLLNPC", "ph_rate"))) %>%
     mutate(YLLAQPC = max(YLLAQPC, na.rm = TRUE) - YLLAQPC,
            YLLNPC = max(YLLNPC, na.rm = TRUE) - YLLNPC,
-           ph_rate = max(ph_rate, na.rm = TRUE) - ph_rate) %>%  # Reverse ph_rate
+           ph_rate = max(ph_rate, na.rm = TRUE) - ph_rate) %>%
     na.omit()
   
   row_ids <- as.numeric(rownames(df_pca))
@@ -707,8 +774,9 @@ calc_pca <- function(df, gp_var) {
   pca_res <- prcomp(df_pca_scaled, center = FALSE, scale. = FALSE)
   eig_vals <- (pca_res$sdev)^2
   prop_variance <- eig_vals / sum(eig_vals)
-  retain <- which(eig_vals > 1)
+  retain <- which(eig_vals > 1)  # Kaiser criterion
   
+  # Calculate variable weights
   variable_weights <- matrix(0, nrow = ncol(df_pca_scaled), ncol = 1)
   for (i in seq_along(retain)) {
     pc_idx <- retain[i]
@@ -721,14 +789,13 @@ calc_pca <- function(df, gp_var) {
   hri_scaled <- (hri - min(hri)) / (max(hri) - min(hri))
   
   result <- data.frame(row_id = row_ids, hri = hri_scaled)
-  df_data <- st_drop_geometry(df)
   df_data %>%
     mutate(row_id = row_number()) %>%
     left_join(result, by = "row_id") %>%
     pull(hri)
 }
 
-# Generate all 12 indices (4 GP methods × 3 weighting approaches)
+# Generate all 12 HRI variants (4 GP methods × 3 weighting approaches)
 gp_vars <- c("mz_2s", "gaus_2s", "kern_2s", "bin_2s")
 methods <- c("naive", "entropy", "pca")
 
@@ -738,265 +805,89 @@ for (gp_var in gp_vars) {
     col_name <- paste0("HRI_", substr(gp_var, 1, nchar(gp_var)-3), "_", 
                        substr(method, 1, 1))
     
+    cat(paste0("  ", col_name, "\n"))
+    
     SA_results[[col_name]] <- switch(method,
                                      "naive" = calc_naive(SA, gp_var),
                                      "entropy" = calc_entropy(SA, gp_var),
-                                     "pca" = calc_pca(SA, gp_var)
-    )
+                                     "pca" = calc_pca(SA, gp_var))
   }
 }
 
-# OUTPUT: Calculate correlation matrix
-cat("\n=== OUTPUT 2: CORRELATION MATRIX OF HRI VARIANTS ===\n")
+# Calculate correlation matrix
+cat("\nCalculating HRI variant correlations...\n")
 index_cols <- grep("^HRI_", names(SA_results), value = TRUE)
 cor_matrix <- cor(st_drop_geometry(SA_results)[, index_cols], 
                   method = "spearman", 
                   use = "pairwise.complete.obs")
 
-col_means <- colMeans(cor_matrix, na.rm = TRUE)
-
-# Print mean values with names (to test stability)
-print(col_means)
-
 write.csv(round(cor_matrix, 3), "output/hri_correlation_matrix.csv")
 
+cat("Mean Spearman correlations:\n")
+print(round(colMeans(cor_matrix, na.rm = TRUE), 3))
+
 ################################################################################
-# KEY COMPONENTS 6-7: Spatial Cross-Validation Random Forest, and 
-# Bootstrap Spatial CV for ALE and Importance with CIs, using the 
-# SArf package (https://github.com/kcredit/SArf)
+# 9. SPATIAL CROSS-VALIDATION RANDOM FOREST
 ################################################################################
 
-cat("\n=== SPATIAL CROSS-VALIDATION RANDOM FOREST ===\n")
+cat("\n=== SPATIAL RANDOM FOREST MODEL ===\n")
 
-# Prepare model data
+# Create derived variables
 SA_results$NoAuto_p <- (SA_results$T11_1_FT + SA_results$T11_1_BIT + 
                         SA_results$T11_1_BUT + SA_results$T11_1_TDLT) / 
                         SA_results$T11_1_TT
 SA_results$BVBHth_p <- (SA_results$T12_3_BT + SA_results$T12_3_VBT) / 
                         SA_results$T12_3_TT
-SA_results$ov60 <- (SA_results$T1_1AGE6_1+SA_results$T1_1AGE6_2+SA_results$T1_1AGE7_1+
-                      SA_results$T1_1AGE7_2+SA_results$T1_1AGE8_1+SA_results$T1_1AGEG_1) / SA_results$T1_1AGETT
-SA_results$nonIrish <- 1-(SA_results$T2_1IEC / SA_results$T2_1TC)
+SA_results$ov60 <- (SA_results$T1_1AGE6_1 + SA_results$T1_1AGE6_2 + 
+                    SA_results$T1_1AGE7_1 + SA_results$T1_1AGE7_2 +
+                    SA_results$T1_1AGE8_1 + SA_results$T1_1AGEG_1) / SA_results$T1_1AGETT
+SA_results$nonIrish <- 1 - (SA_results$T2_1IEC / SA_results$T2_1TC)
 SA_results$POPD <- SA_results$T1_1AGETT / SA_results$SHAPE_Area
 
-# Create spatial neighbors (20 nearest neighbors)
-coords <- st_centroid(st_geometry(SA_results), of_largest_polygon=TRUE)
-sar.nb20 <- spdep::knearneigh(coords, k=20)
-sar.nb20 <- spdep::knn2nb(sar.nb20)
-sar.wt <- spdep::nb2listw(sar.nb20, style="W")
-
-## Spatial Cross-Validation Setup ##
-
+# Prepare model data
 model_data <- SA_results %>%
-  filter(!is.na(HRI_gaus_e)) %>%
-  select(HRI_gaus_e, In22_ED, NoAuto_p, POPD, log_dist, ov60, nonIrish)
+  filter(!is.na(HRI_gaus_p)) %>%
+  select(HRI_gaus_p, In22_ED, NoAuto_p, POPD, log_dist, ov60, nonIrish)
 
+# Standardize variables
 model_data <- model_data %>%
   mutate(across(-geometry, ~scale(.)[,1]))
 
-# Export
-# write_sf(model_data, "model_data.shp")
+# Run SArf (Spatial Random Forest with within-fold spatial CV)
+cat("Running spatial cross-validation random forest...\n")
+cat("This may take several minutes...\n\n")
 
-#Smaller sample for testing
-# sampled_data <- model_data %>% slice_sample(n = 500)
-
-# Run SArf
 results <- SArf(
-  HRI_gaus_e ~ In22_ED + NoAuto_p + POPD + log_dist + ov60 + nonIrish,
+  HRI_gaus_p ~ In22_ED + NoAuto_p + POPD + log_dist + ov60 + nonIrish,
   data = model_data,
-  k_neighbors = 20,            # Number of neighbors for spatial weights
+  k_neighbors = 20,            # Neighbors for spatial lag
   n_folds = 5,                 # Spatial CV folds
-  n_bootstrap = 20,            # Bootstrap iterations
+  n_bootstrap = 20,            # Bootstrap iterations for CIs
   num_trees = 500,             # Trees in random forest
-  include_naive_rf = TRUE,     # For comparison with "naive" random forest
+  include_naive_rf = TRUE,     # Compare with naive RF
   naive_test_fraction = 0.2,   
-  create_map = TRUE,           # Spatial folds map
-  block_range = 5000,          # Size of the spatial blocks in units of metres
-  verbose = TRUE               # Print progress
+  create_map = TRUE,           # Map of spatial folds
+  block_range = 5000,          # Block size (meters)
+  verbose = TRUE
 )
 
-# print(results) # Shows all results
+# Display results
+cat("\n=== MODEL RESULTS ===\n")
+print(results$model_comparison)
 
-# View specific results outputs
-results$moran_test              # Moran's I test for outcome variable
-results$moran_plot              # Moran's I scatter plot
-results$model_comparison        # RF vs OLS/SAR/SEM/SAC table
-show_models(results)            # Full spatial econometric model results
-results$variable_importance     # Importance with CIs
-results$importance_plot         # Importance bar chart
-results$ale_results             # ALE data
-results$ale_plots               # ALE plots with CIs
+cat("\n=== VARIABLE IMPORTANCE (with 95% CIs) ===\n")
+# print(results$variable_importance)
 
-# =================================================================
-# VERIFICATION CODE TO ENSURE SPATIAL LAGS ARE CALCULATED CORRECTLY
-# =================================================================
+# View plots
+# print(results$moran_plot)
+print(results$importance_plot)
+print(results$ale_plots)
 
-# Extract spatial_weights from results
-spatial_weights <- results$spatial_weights
-
-# ========================================
-# 1. Get fold structure for verification
-# ========================================
-fold_1 <- results$spatial_cv_results$predictions %>%
-  filter(fold == 1, iteration == 1)
-
-test_idx <- fold_1 %>% filter(in_training == FALSE) %>% pull(row_id)
-train_idx <- fold_1 %>% filter(in_training == TRUE) %>% pull(row_id)
-
-cat("Fold 1, Iteration 1:\n")
-cat("Training observations:", length(train_idx), "\n")
-cat("Test observations:", length(test_idx), "\n\n")
-
-# ========================================
-# 2. Get coordinates and extract k
-# ========================================
-all_coords <- st_coordinates(st_centroid(st_geometry(model_data)))
-train_coords <- all_coords[train_idx, , drop = FALSE]
-
-# Extract k from spatial_weights
-k_neighbors <- round(mean(sapply(spatial_weights$neighbours, length)))
-cat("k (number of neighbors):", k_neighbors, "\n\n")
-
-# ========================================
-# 3. For EACH test observation, verify neighbors are ALL from training set
-# ========================================
-cat("=== Verifying Spatial Lag Calculation ===\n\n")
-
-# Get response variable name from results
-response_var <- all.vars(results$formula)[1]
-
-verification_results <- data.frame(
-  test_obs = test_idx,
-  stored_lag = numeric(length(test_idx)),
-  calculated_lag = numeric(length(test_idx)),
-  match = logical(length(test_idx)),
-  n_neighbors = numeric(length(test_idx)),
-  any_from_test = logical(length(test_idx))
-)
-
-for (i in 1:length(test_idx)) {
-  obs <- test_idx[i]
-  
-  # Get stored spatial lag from predictions
-  stored_lag <- fold_1 %>% filter(row_id == obs) %>% pull(spatial_lag)
-  
-  # Calculate what spatial lag SHOULD be (using training neighbors only)
-  obs_coord <- all_coords[obs, , drop = FALSE]
-  
-  # Find distances to ALL training observations
-  dists <- sqrt(rowSums(sweep(train_coords, 2, obs_coord, "-")^2))
-  
-  # Find k nearest TRAINING neighbors
-  k_to_use <- min(k_neighbors, length(dists))
-  nearest_indices <- order(dists)[1:k_to_use]
-  neighbor_rows <- train_idx[nearest_indices]
-  
-  # Calculate spatial lag with W-style weights (simple mean)
-  calculated_lag <- mean(model_data[[response_var]][neighbor_rows])
-  
-  # Check if any neighbors are from test set (should be NONE!)
-  any_from_test <- any(neighbor_rows %in% test_idx)
-  
-  # Store results
-  verification_results$stored_lag[i] <- stored_lag
-  verification_results$calculated_lag[i] <- calculated_lag
-  verification_results$match[i] <- abs(stored_lag - calculated_lag) < 0.001
-  verification_results$n_neighbors[i] <- k_to_use
-  verification_results$any_from_test[i] <- any_from_test
-}
-
-# ========================================
-# 4. Summary Statistics
-# ========================================
-cat("=== VERIFICATION RESULTS ===\n\n")
-
-cat("Total test observations checked:", nrow(verification_results), "\n")
-cat("Stored values match calculated:", sum(verification_results$match), "/", nrow(verification_results), "\n")
-cat("Observations with neighbors from test set:", sum(verification_results$any_from_test), "\n\n")
-
-if (sum(verification_results$any_from_test) > 0) {
-  cat("❌ PROBLEM: Some test observations have neighbors from test set!\n")
-  cat("This indicates data leakage.\n\n")
-  
-  # Show which observations have test neighbors
-  problem_obs <- verification_results %>% filter(any_from_test == TRUE)
-  cat("Problem observations:\n")
-  print(problem_obs %>% select(test_obs, any_from_test))
-  
-} else {
-  cat("✅ SUCCESS: NO test observations have neighbors from test set!\n")
-  cat("All spatial lags use only training neighbors.\n\n")
-}
-
-if (all(verification_results$match)) {
-  cat("✅ SUCCESS: All stored spatial_lag values match manual calculations!\n")
-  cat("The order() bug is fixed.\n\n")
-} else {
-  cat("❌ PROBLEM: Some stored values don't match calculations!\n")
-  cat("Number of mismatches:", sum(!verification_results$match), "\n\n")
-  
-  # Show mismatches
-  mismatches <- verification_results %>% filter(match == FALSE)
-  cat("Mismatched observations (first 10):\n")
-  print(head(mismatches %>% select(test_obs, stored_lag, calculated_lag), 10))
-}
-
-# ========================================
-# 5. Detailed Check for Random Sample
-# ========================================
-cat("\n=== DETAILED CHECK: 5 Random Test Observations ===\n\n")
-
-sample_obs <- sample(test_idx, min(5, length(test_idx)))
-
-for (obs in sample_obs) {
-  cat("Observation:", obs, "\n")
-  
-  # Get stored value
-  stored <- fold_1 %>% filter(row_id == obs) %>% pull(spatial_lag)
-  
-  # Calculate manually
-  obs_coord <- all_coords[obs, , drop = FALSE]
-  dists <- sqrt(rowSums(sweep(train_coords, 2, obs_coord, "-")^2))
-  k_to_use <- min(k_neighbors, length(dists))
-  nearest_indices <- order(dists)[1:k_to_use]
-  neighbor_rows <- train_idx[nearest_indices]
-  calculated <- mean(model_data[[response_var]][neighbor_rows])
-  
-  cat("  Stored spatial_lag:    ", round(stored, 6), "\n")
-  cat("  Calculated spatial_lag:", round(calculated, 6), "\n")
-  cat("  Match:                 ", abs(stored - calculated) < 0.001, "\n")
-  cat("  Number of neighbors:   ", k_to_use, "\n")
-  cat("  All from training set: ", all(neighbor_rows %in% train_idx), "\n")
-  cat("  Any from test set:     ", any(neighbor_rows %in% test_idx), "\n")
-  
-  # Show neighbor IDs
-  cat("  Neighbor row IDs:      ", paste(head(neighbor_rows, 10), collapse = ", "))
-  if (k_to_use > 10) cat(", ...")
-  cat("\n\n")
-}
-
-# ========================================
-# 6. Final Summary
-# ========================================
-cat("=== FINAL ASSESSMENT ===\n\n")
-
-if (sum(verification_results$any_from_test) == 0 && all(verification_results$match)) {
-  cat("✅✅✅ PERFECT! ✅✅✅\n")
-  cat("1. NO data leakage (all neighbors from training set)\n")
-  cat("2. Storage is correct (stored values match calculations)\n")
-  cat("3. Your spatial CV implementation is working correctly!\n")
-} else {
-  if (sum(verification_results$any_from_test) > 0) {
-    cat("❌ Data leakage detected\n")
-  }
-  if (!all(verification_results$match)) {
-    cat("❌ Storage bug detected\n")
-  }
-  cat("\nSee details above for specific issues.\n")
-}
+# Save detailed spatial model results
+show_models(results)
 
 ################################################################################
-# KEY COMPONENT 8: Interactive Maps
+# 10. INTERACTIVE MAPS
 ################################################################################
 
 cat("\n=== CREATING INTERACTIVE MAPS ===\n")
@@ -1084,7 +975,7 @@ map_aq <- leaflet(SA_results) %>%
     fillOpacity = 0.5,
     color = "white",
     weight = 0.1,
-    label = ~paste0("YLL (per 100K) air pollution: ", round(YLLAQPC, 2))
+    label = ~paste0("YLL (per 100K): ", round(YLLAQPC, 2))
   ) %>%
   addLegend(
     pal = palaq,
@@ -1094,8 +985,7 @@ map_aq <- leaflet(SA_results) %>%
   )
 
 # Map 6: Noise YLL
-SA_results_filtered <- SA_results %>%
-  filter(!is.na(YLLNPC) & YLLNPC > 0)
+SA_results_filtered <- SA_results %>% filter(!is.na(YLLNPC) & YLLNPC > 0)
 
 paln <- colorQuantile("Reds", SA_results_filtered$YLLNPC, n = 5)
 map_noise <- leaflet(SA_results_filtered) %>%
@@ -1105,7 +995,7 @@ map_noise <- leaflet(SA_results_filtered) %>%
     fillOpacity = 0.5,
     color = "white",
     weight = 0.1,
-    label = ~paste0("YLL (per 100K) noise: ", round(YLLNPC, 2))
+    label = ~paste0("YLL (per 100K): ", round(YLLNPC, 2))
   ) %>%
   addLegend(
     pal = paln,
@@ -1114,7 +1004,7 @@ map_noise <- leaflet(SA_results_filtered) %>%
     position = "bottomright"
   )
 
-# Map 7: Poor quality housing
+# Map 7: Poor Quality Housing
 SA_results$ph_rate[is.na(SA_results$ph_rate) | is.infinite(SA_results$ph_rate)] <- 0
 
 palhq <- colorQuantile("viridis", SA_results$ph_rate, n = 5)
@@ -1125,18 +1015,35 @@ map_hq <- leaflet(SA_results) %>%
     fillOpacity = 0.5,
     color = "white",
     weight = 0.1,
-    label = ~paste0("Rate of housing with BER of E or worse: ", round(ph_rate, 2))
+    label = ~paste0("BER E or worse: ", round(ph_rate, 2))
   ) %>%
   addLegend(
     pal = palhq,
     values = ~ph_rate,
-    title = "Poor quality housing rate",
+    title = "Poor Quality Housing",
     position = "bottomright"
   )
 
-# Save maps as HTML widgets
-library(htmlwidgets)
+# Map 8: Excess YLL Risk (age-adjusted)
+sd_bins <- c(-Inf, -2, -1, 0, 1, 2, Inf)
+palen <- colorBin("RdYlBu", SA_results$excess_YLLPC, bins = sd_bins, reverse = TRUE)
+map_excess <- leaflet(SA_results) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~palen(excess_YLLPC),
+    fillOpacity = 0.5,
+    color = "white",
+    weight = 0.1,
+    label = ~paste0("Excess YLL: ", round(excess_YLLPC, 2))
+  ) %>%
+  addLegend(
+    pal = palen,
+    values = ~excess_YLLPC,
+    title = "Excess YLL",
+    position = "bottomright"
+  )
 
+# Save maps
 saveWidget(map_hri, "output/map_hri.html")
 saveWidget(map_gs, "output/map_green_space.html")
 saveWidget(map_bs, "output/map_blue_space.html")
@@ -1144,6 +1051,15 @@ saveWidget(map_gp, "output/map_gp_access.html")
 saveWidget(map_aq, "output/map_air_pollution_yll.html")
 saveWidget(map_noise, "output/map_noise_yll.html")
 saveWidget(map_hq, "output/map_housing_quality.html")
+saveWidget(map_excess, "output/map_excess_yll.html")
 
-cat("\n=== OUTPUT 7: MAPS SAVED ===\n")
-cat("Maps have been saved as HTML files in the output/ directory\n")
+################################################################################
+# ANALYSIS COMPLETE
+################################################################################
+
+cat("\n=== ANALYSIS COMPLETE ===\n")
+cat("Results saved to output/ directory:\n")
+cat("  - total_years_life_lost.csv\n")
+cat("  - hri_correlation_matrix.csv\n")
+cat("  - Interactive HTML maps\n")
+cat("  - Model results (from SArf package)\n")
