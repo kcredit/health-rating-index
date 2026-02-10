@@ -2,7 +2,7 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15183740.svg)](https://doi.org/10.5281/zenodo.15183740)
 
-This repository provides a comprehensive analysis of environmental health burdens and benefits in Dublin, Ireland. The project calculates a **Health Rating Index (HRI)** that combines years of life lost from environmental exposures (air pollution and road noise) with poor quality housing rate and access to health benefits (GP services, green spaces, and blue spaces). This repository expands on the methods used in the paper referenced here; updated version forthcoming.
+This repository provides a comprehensive analysis of environmental health burdens and benefits in Dublin, Ireland. The project calculates a **Health Rating Index (HRI)** that combines years of life lost from environmental exposures (air pollution and road noise) with poor quality housing rate and access to health benefits (GP services, green spaces, and blue spaces). This repository accompanies the methods described in [Credit, Kaur, and Eccles (2026)](https://doi.org/10.1016/j.wss.2026.100356).
 
 ## 📋 Overview
 
@@ -242,20 +242,24 @@ Three weighting approaches:
 Please cite this work as:
 
 ```
-Credit, K., Damanpreet, K., and Eccles, E. 2025. 
-"Exploring the transport-health-environment nexus through a new 'Health Rating Index' 
-for Dublin, Ireland." Proceedings of the 33rd GISRUK Conference. 
-DOI: https://doi.org/10.5281/zenodo.15183740
+Credit, K., Kaur, D., and Eccles, E. 2026.
+"Analysing urban inequalities in environment and health at the neighbourhood scale
+in Dublin through a new open-access 'Health Rating Index'."
+Wellbeing, Space and Society, 10, 100356.
+DOI: https://doi.org/10.1016/j.wss.2026.100356
 ```
 
 BibTeX:
 ```bibtex
-@inproceedings{credit2025health,
-  title={Exploring the transport-health-environment nexus through a new 'Health Rating Index' for Dublin, Ireland},
-  author={Credit, Kevin and Damanpreet, Kaur and Eccles, Emma},
-  booktitle={Proceedings of the 33rd GISRUK Conference},
-  year={2025},
-  doi={10.5281/zenodo.15183740}
+@article{credit2026health,
+  title={Analysing urban inequalities in environment and health at the neighbourhood scale in Dublin through a new open-access 'Health Rating Index'},
+  author={Credit, Kevin and Kaur, Damanpreet and Eccles, Emma},
+  journal={Wellbeing, Space and Society},
+  volume={10},
+  pages={100356},
+  year={2026},
+  publisher={Elsevier},
+  doi={10.1016/j.wss.2026.100356}
 }
 ```
 
@@ -290,7 +294,7 @@ For questions or collaboration inquiries:
 ## 📄 License
 
 This project is shared for academic and public health research purposes. When using the data or code, please:
-1. Cite the conference paper
+1. Cite the journal article (see Citation section above)
 2. Acknowledge the data sources
 3. Share derivative works openly when possible
 
