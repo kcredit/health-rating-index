@@ -291,6 +291,10 @@ For questions or collaboration inquiries:
 - **Kevin Credit**: [GitHub Profile](https://github.com/kcredit)
 - Open an issue on this repository
 
+## 🤖 AI Assistance Disclosure
+
+This repository and code was developed with assistance from [Claude Code](https://claude.ai/claude-code). All AI-generated code was reviewed, tested, and validated by the authors, who take full responsibility for the accuracy and reproducibility of all computational results.
+
 ## 📄 License
 
 This project is shared for academic and public health research purposes. When using the data or code, please:
